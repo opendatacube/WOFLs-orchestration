@@ -1,81 +1,109 @@
-import water_classifier_and_wofs
-import DEADataHandling
-import numpy as np
-import os
-import sys
-import warnings
-import xarray as xr
-import matplotlib as mpl
-
-# modules for datacube
 import datacube
-from datacube.storage import masking
-from datacube.helpers import write_geotiff
-
-# set datacube alias (just a string with what you're doing)
-dc = datacube.Datacube(app='dc-WOfS and water classifier')
-
-# Import external functions from dea-notebooks
-sys.path.append('../10_Scripts/')
-
-# ignore datacube warnings (needs to be last import statement)
-warnings.filterwarnings('ignore', module='datacube')
-
-# Use this to manually define an upper left/lower right coords
-lat_max = -12.4
-lat_min = -12.7
-lon_max = 135.2
-lon_min = 134.9
-
-# define temporal range
-start_of_epoch = '2016-01-01'
-end_of_epoch = '2016-05-01'
-
-# define Landsat sensors of interest
-sensors = ['ls8', 'ls7', 'ls5']
-
-#Query is created
-query = {'time': (start_of_epoch, end_of_epoch), }
-query['x'] = (lon_min, lon_max)
-query['y'] = (lat_max, lat_min)
-query['crs'] = 'EPSG:4326'
-
-print(query)
-
-mask_dict = {'cloud_acca': 'no_cloud',
-             'cloud_fmask': 'no_cloud',
-             'cloud_shadow_acca': 'no_cloud_shadow',
-             'cloud_shadow_fmask': 'no_cloud_shadow',
-             'blue_saturated': False,
-             'green_saturated': False,
-             'red_saturated': False,
-             'nir_saturated': False,
-             'swir1_saturated': False,
-             'swir2_saturated': False}
-
-# using the load function from DEADataHandling to get the data and filter
-nbart = DEADataHandling.load_clearlandsat(dc, query,
-                                          product='nbart',
-                                          masked_prop=0,
-                                          mask_dict=mask_dict)
-
-# Use water clasifier function
-warnings.filterwarnings('ignore')  # turn off warnings
-water_class = water_classifier_and_wofs.water_classifier(nbart)
-warnings.filterwarnings('always')  # turn on warnings
-print(water_class)
-
-# note, this is using only one band for the count, and this isn't robust.
-total_water_obs = water_class.wofs.sum(dim='time')
-nbar_count = nbart.blue.count(dim='time')
-wofs = ((total_water_obs / nbar_count)*100)
+import sys
+import os
+import boto3
+import wofs.wofs_app
+from datacube import helpers
+from datacube.utils import geometry
+import xarray as xr
+from ruamel.yaml import YAML
 
 
-# Convert to a dataset and restore spatial attributes
-dataset = wofs.to_dataset(name='wofs')
-dataset.attrs['affine'] = nbart.affine
-dataset.attrs['crs'] = nbart.crs
+# Load config from env vars
+INPUT_S3_BUCKET = os.environ['INPUT_S3_BUCKET']
+INPUT_FILE = os.environ['INPUT_FILE']
+# strip the filename from the path
+OUTPUT_S3_BUCKET = os.environ['OUTPUT_S3_BUCKET']
 
-write_geotiff('wofs_{}_{}.tif'.format(start_of_epoch, end_of_epoch), dataset)
 
-# Save to s3
+def _read_yaml(client, bucket, path):
+
+    safety = 'safe'
+
+    # Read the file from S3
+    obj = client.Object(bucket, path).get(
+        ResponseCacheControl='no-cache')
+    raw = obj['Body'].read()
+
+    # Convert the raw file to a dict
+    yaml = YAML(typ=safety, pure=False)
+    yaml.default_flow_style = False
+    data = yaml.load(raw)
+
+    return data
+
+
+def _load_data(dc, ds_id):
+
+    # get the dataset and crs, so we don't change them on load
+    d = dc.index.datasets.get(ds_id)
+    crs = d.crs
+    product = d.type.name
+    # resample to highest band
+    # res = '(-10,10)'
+    res = d.measurements['fmask']['info']['geotransform'][5], d.measurements['fmask']['info']['geotransform'][1]
+
+    data = dc.load(product=product,
+                   datasets=[d],
+                   output_crs=crs,
+                   resolution=res)
+    return data
+
+
+def _classify(data):
+    print("Classify the dataset")
+    water = wofs.classifier.classify(data).to_dataset(dim="water")
+    print(water)
+    water.attrs['crs'] = geometry.CRS(data.attrs['crs'])
+
+    return water
+
+
+def _save(ds, name):
+    helpers.write_geotiff(name, ds)
+
+
+def _mask(water, fmask):
+    # fmask: null(0), cloud(2), cloud shadow(3)
+    return water.where(~(fmask.isin([0, 2, 3])))
+
+
+if __name__ == '__main__':
+
+    # Initialise clients
+    s3 = boto3.resource('s3')
+    dc = datacube.Datacube(app='dc-visualize')
+
+    # get id from yaml file
+    metadata = _read_yaml(s3, INPUT_S3_BUCKET, INPUT_FILE)
+
+    # Load data
+    data = _load_data(dc, metadata.id, product=metadata.)
+
+    # Classify it
+    water = _classify(data)
+
+    # Convert to COG
+    _save(water, loc+outfile)
+    _save(_mask(water, ds[-1]), 'WATER.TIFF')
+
+    # Upload to S3
+
+    year = "2019"
+    monthdays = ['0214']  # , '0219',]
+    for md in monthdays:
+        loc = "/g/data/u46/users/bt2744/work/data/floodFeb19/s2_imagery/2019-" + \
+            md[0:2]+"-"+md[2:4]+"/"
+
+        cells = ["T54KWG", "T54KXG", "T54KXF",
+                 "T54KXE", "T54KXD", "T54KXC"]  # "T54KWC"]
+
+        for cell in cells:
+            infile = cell+"-"+md+".vrt"
+            outfile = "water_"+infile.split('.')[0]+".tif"
+
+            print("Processing "+infile+"....")
+            ds = _load_file_data(loc+infile)
+            water = _classify(ds[0:6])
+            _save(water, loc+outfile)
+            _save(_mask(water, ds[-1]), loc+"m_"+outfile)
