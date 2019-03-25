@@ -78,7 +78,7 @@ if __name__ == '__main__':
     metadata = _read_yaml(s3, INPUT_S3_BUCKET, INPUT_FILE)
 
     # Load data
-    data = _load_data(dc, metadata.id, product=metadata.)
+    data = _load_data(dc, metadata.id)
 
     # Classify it
     water = _classify(data)
