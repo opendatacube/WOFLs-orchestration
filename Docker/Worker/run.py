@@ -38,25 +38,6 @@ def _read_yaml(client, bucket, path):
     return data
 
 
-def _load_fmask(client, bucket, metadata_path, fmask_path):
-    """
-    loads fmask from s3
-
-    :param boto3.resource client: An initialised s3 client
-    :param str bucket: The name of the s3 bucket
-    :param str metadata_path: The filepath of the yaml file in the bucket
-    :param str fmask_path: The relative path of fmask from the yaml file
-    :return: xarray data
-    """
-    # create a path to the fmask file
-    basepath, filename = os.path.split(metadata_path)
-    path = 's3://' + bucket + '/' + basepath + '/' + fmask_path
-
-    # Read the file from S3
-    with xr.open_rasterio(path) as data:
-        return data
-
-
 def _load_data(dc, ds_id):
     """
     loads data from a single dataset, in it's original crs
@@ -79,6 +60,25 @@ def _load_data(dc, ds_id):
                    output_crs=crs,
                    resolution=res)
     return data
+
+
+def _load_fmask(client, bucket, metadata_path, fmask_path):
+    """
+    loads fmask from s3
+
+    :param boto3.resource client: An initialised s3 client
+    :param str bucket: The name of the s3 bucket
+    :param str metadata_path: The filepath of the yaml file in the bucket
+    :param str fmask_path: The relative path of fmask from the yaml file
+    :return: xarray data
+    """
+    # create a path to the fmask file
+    basepath, filename = os.path.split(metadata_path)
+    path = 's3://' + bucket + '/' + basepath + '/' + fmask_path
+
+    # Read the file from S3
+    with xr.open_rasterio(path) as data:
+        return data
 
 
 def _classify(data):
