@@ -306,7 +306,7 @@ if __name__ == '__main__':
     # Upload metadata to S3
     _upload(s3,
             OUTPUT_S3_BUCKET,
-            s3_filepath + '/' + masked_filename,
+            s3_filepath + '/ARD_METADATA.yaml',
             data=metadata_doc)
 
     logging.info('Done!')
