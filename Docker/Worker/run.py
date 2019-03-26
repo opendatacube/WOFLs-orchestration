@@ -1,17 +1,59 @@
+#!/usr/bin/env python3
+"""
+Converts a Sentinel 2 Granule to a WOFS Observation
+
+This script will take the location of a dataset yaml file, and output a WOFS Observation to an s3 bucket.
+it requires a datacube with the Sentinel 2 Granule indexed.
+
+Last Change: 2019/03/26
+Authors: Belle Tissot & Tom Butler
+"""
+
+import yaml as pyyaml
 import datacube
 import os
 import boto3
-import wofs.wofs_app
+import dateutil.parser
+from wofs import classifier
 from datacube import helpers
 from datacube.utils import geometry
+from datacube.model.utils import make_dataset
 import xarray as xr
 from ruamel.yaml import YAML
+import logging
+from datacube.utils.geometry import GeoBox
+from affine import Affine
+from pathlib import Path
+
+try:
+    from yaml import CSafeDumper as SafeDumper
+except ImportError:
+    from yaml import SafeDumper
+
+# This will be run in docker, so we load config from env vars
+INPUT_S3_BUCKET = os.getenv('INPUT_S3_BUCKET', 'dea-public-data')
+INPUT_FILE = os.getenv(
+    'INPUT_FILE', 'L2/sentinel-2-nrt/S2MSIARD/2019-03-20/S2A_OPER_MSI_ARD_TL_EPAE_20190320T024743_A019533_T52JEP_N02.07/ARD-METADATA.yaml')
+OUTPUT_S3_BUCKET = os.getenv('OUTPUT_S3_BUCKET', 'dea-public-data')
+OUTPUT_PATH = 'WOfS/WOFLs/v2.1.6/combined/'
+LOG_LEVEL = 'INFO'
+FILE_PREFIX = 'S2_WATER_3577'
 
 
-# Load config from env vars
-INPUT_S3_BUCKET = os.environ['INPUT_S3_BUCKET']
-INPUT_FILE = os.environ['INPUT_FILE']
-OUTPUT_S3_BUCKET = os.environ['OUTPUT_S3_BUCKET']
+def _get_log_level(level):
+    """
+    converts text to log level
+
+    :param str level: a string with the value of: NOTSET, DEBUG, INFO, WARNING, ERROR, CRITICAL
+    """
+    return {
+        'NOTSET': logging.NOTSET,
+        'DEBUG': logging.DEBUG,
+        'INFO': logging.INFO,
+        'WARNING': logging.WARNING,
+        'ERROR': logging.ERROR,
+        'CRITICAL': logging.CRITICAL,
+    }.get(level, logging.INFO)
 
 
 def _read_yaml(client, bucket, path):
@@ -23,17 +65,22 @@ def _read_yaml(client, bucket, path):
     :param str path: The filepath of the yaml file in the bucket
     :return: dict data
     """
-    safety = 'safe'
 
+    logging.info('Loading yaml: %s', 's3://' + bucket + '/' + path)
     # Read the file from S3
     obj = client.Object(bucket, path).get(
         ResponseCacheControl='no-cache')
     raw = obj['Body'].read()
 
     # Convert the raw file to a dict
+    safety = 'safe'
+    logging.debug('Using Yaml Safety: %s', safety)
     yaml = YAML(typ=safety, pure=False)
     yaml.default_flow_style = False
     data = yaml.load(raw)
+    logging.debug('ID from yaml: %s', data['id'])
+    logging.debug('fmask path from yaml: %s',
+                  data['image']['bands']['fmask']['path'])
 
     return data
 
@@ -45,21 +92,31 @@ def _load_data(dc, ds_id):
     :param Datacube dc: An initialised datacube client
     :param str ds_id: The id of the dataset we want to load
     :return: xarray data
+    :return: str extent 
     """
 
+    logging.info('Loading Dataset %s', ds_id)
     # get the dataset and crs, so we don't change them on load
     d = dc.index.datasets.get(ds_id)
     crs = d.crs
     product = d.type.name
+
     # resample to highest band
-    # res = '(-10,10)'
-    res = d.measurements['fmask']['info']['geotransform'][5], d.measurements['fmask']['info']['geotransform'][1]
+    res = (-10, 10)
+    # res = d.measurements['fmask']['info']['geotransform'][5], d.measurements['fmask']['info']['geotransform'][1]
+
+    logging.debug('Using CRS: %s', crs)
+    logging.debug('Using resolution: %s', str(res))
 
     data = dc.load(product=product,
                    datasets=[d],
                    output_crs=crs,
                    resolution=res)
-    return data
+
+    extent = d.extent
+
+    logging.debug('Loaded Data: %s', data)
+    return data, extent
 
 
 def _load_fmask(client, bucket, metadata_path, fmask_path):
@@ -76,6 +133,8 @@ def _load_fmask(client, bucket, metadata_path, fmask_path):
     basepath, filename = os.path.split(metadata_path)
     path = 's3://' + bucket + '/' + basepath + '/' + fmask_path
 
+    logging.info('Loading fmask from: %s', path)
+
     # Read the file from S3
     with xr.open_rasterio(path) as data:
         return data
@@ -88,10 +147,12 @@ def _classify(data):
     :param xarray data: An xarray of a single granule including bands: blue, green, red, nir, swir1, swir2
     :return: xarray water
     """
-    print("Classify the dataset")
-    water = wofs.classifier.classify(data).to_dataset(dim="water")
-    print(water)
+    logging.info('Classifying dataset')
+    water = classifier.classify(data).to_dataset(dim="water")
+    logging.info('Classification complete')
+    logging.debug(water)
     water.attrs['crs'] = geometry.CRS(data.attrs['crs'])
+    logging.debug('Set CRS to: %s', data.attrs['crs'])
 
     return water
 
@@ -103,6 +164,7 @@ def _save(ds, name):
     :param xarray ds: An xarray
     :param str name: the file path including filename
     """
+    logging.info('Writing file: %s', name)
     helpers.write_geotiff(name, ds)
 
 
@@ -113,30 +175,138 @@ def _mask(water, fmask):
     :param xarray water: The dataset to be masked
     :param xarray fmask: The fmask values
     :param str name: the file path including filename
+    :return: xarray data: masked data 
     """
+    logging.debug('Masking dataset')
     # fmask: null(0), cloud(2), cloud shadow(3)
     return water.where(~(fmask.isin([0, 2, 3])))
+
+
+def _generate_filepath(file_prefix, path_prefix, center_time, tile_id):
+    """
+    using the prefix, centre_time, and tile_id, create /<prefix>/<yyyy-mm-dd>/<x>/<y>/
+
+    :param str prefix: A prefix to be applied to the filepath
+    :param str centre_time: time of recording in iso_8601
+    :param str tile_id: The NRT Tile id, must end in _AXXXXX_TXXXXX_XXX.XX
+    :return: str filepath: the combined filepath
+    """
+    # pull the date from the centre_time
+    if not centre_time[-1] is 'Z':
+        logging.error(
+            'center_time is in incorrect format, expected an iso_8601 but got: %s', centre_time)
+        sys.exit(1)
+    date = dateutil.parser.parse(centre_time).date()
+
+    # we pull the military coords from the yaml path
+    s = tile_id.split('_')
+
+    # AXXXXX
+    x = s[-3]
+    if not x.startswith('A') or not len(x) is 6:
+        logging.error(
+            'Cannot determine military coords, expected AXXXXXX but got: %s', x)
+        sys.exit(1)
+
+    # TXXXXX
+    y = s[-2]
+    if not y.startswith('T') or not len(y) is 6:
+        logging.error(
+            'Cannot determine military coords, expected TXXXXXX but got: %s', y)
+        sys.exit(1)
+
+    filepath = path_prefix + '/' + date + '/' + x + '/' + y + '/'
+    logging.info('Using remote filepath: %s', filepath)
+
+    filename = file_prefix + '_' + center_time + '_' + x + '_' + y
+
+    return filepath, filename
+
+
+def _create_metadata_file(dc, product_name, center_time, uri, extent):
+    """
+    Create a datacube metadata document
+
+    :param Datacube dc: An initialised datacube
+    :param str centre_time: time of recording in iso_8601
+    :param str uri: the path from metadata doc, to dataset files (just the filename)
+    :return: str metadata_doc: the contents of the metadata doc
+    """
+    # from https://github.com/GeoscienceAustralia/wofs-confidence/blob/master/confidence/wofs_filtered.py
+    # Compute metadata
+
+    product = dc.index.products.get_by_name(product_name)
+
+    dts = make_dataset(product=product, sources=self.factor_sources,
+                       extent=extent, center_time=center_time, uri=uri)
+
+    metadata = pyyaml.dump(
+        dts.metadata_doc, Dumper=SafeDumper, encoding='utf-8')
+    return metadata
+
+
+def _upload(client, bucket, remote_path, local_file=None, data=None):
+
+    if local_file is not None:
+        data = open(local_file, 'rb')
+
+    client.put_object(
+        Bucket=bucket,
+        Key=remote_path,
+        Body=data
+    )
 
 
 if __name__ == '__main__':
 
     # Initialise clients
     s3 = boto3.resource('s3')
-    dc = datacube.Datacube(app='dc-visualize')
+    dc = datacube.Datacube(app='WOFL-iron')
+    logging.basicConfig(
+        format='%(asctime)s %(levelname)s %(message)s', level=_get_log_level(LOG_LEVEL))
 
     # get contents of yaml file
     metadata = _read_yaml(s3, INPUT_S3_BUCKET, INPUT_FILE)
 
     # Load data
-    data = _load_data(dc, metadata.id)
+    data, extent = _load_data(dc, metadata['id'])
     fmask = _load_fmask(s3, INPUT_S3_BUCKET, INPUT_FILE,
-                        metadata.image.bands.fmask.path)
+                        metadata['image']['bands']['fmask']['path'])
 
     # Classify it
     water = _classify(data)
 
-    # Convert to COG
-    _save(water, 'WATER.TIFF')
-    _save(_mask(water, fmask), 'WATER.TIFF')
+    # Get file naming config
+    filename, s3_filepath = _generate_filepath(
+        FILE_PREFIX,
+        OUTPUT_PATH,
+        metadata['centre_dt'],
+        metadata['tile_id'])
 
-    # Upload to S3
+    masked_filename = filename + '_water.tiff'
+
+    metadata_doc = _create_metadata_file(
+        dc,
+        'wofs_nrt',
+        metadata['centre_dt'],
+        masked_filename,
+        extent
+    )
+
+    # Save to local system as COG
+    _save(water, './' + filename + '_raw_water.tiff')
+    _save(_mask(water, fmask), './' + masked_filename)
+
+    # Upload data to S3
+    _upload(s3,
+            OUTPUT_S3_BUCKET,
+            s3_filepath + '/' + masked_filename,
+            local_file='./' + masked_filename)
+
+    # Upload metadata to S3
+    _upload(s3,
+            OUTPUT_S3_BUCKET,
+            s3_filepath + '/' + masked_filename,
+            data=metadata_doc)
+
+    logging.info('Done!')
