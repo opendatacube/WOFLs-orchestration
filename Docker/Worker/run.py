@@ -5,13 +5,14 @@ Converts a Sentinel 2 Granule to a WOFS Observation
 This script will take the location of a dataset yaml file, and output a WOFS Observation to an s3 bucket.
 it requires a datacube with the Sentinel 2 Granule indexed.
 
-Last Change: 2019/03/26
+Last Change: 2019/03/27
 Authors: Belle Tissot & Tom Butler
 """
 
 import yaml as pyyaml
 import datacube
 import os
+import sys
 import boto3
 import dateutil.parser
 from wofs import classifier
@@ -31,13 +32,20 @@ except ImportError:
     from yaml import SafeDumper
 
 # This will be run in docker, so we load config from env vars
-INPUT_S3_BUCKET = os.getenv('INPUT_S3_BUCKET', 'dea-public-data')
-INPUT_FILE = os.getenv(
-    'INPUT_FILE', 'L2/sentinel-2-nrt/S2MSIARD/2019-03-20/S2A_OPER_MSI_ARD_TL_EPAE_20190320T024743_A019533_T52JEP_N02.07/ARD-METADATA.yaml')
-OUTPUT_S3_BUCKET = os.getenv('OUTPUT_S3_BUCKET', 'dea-public-data')
-OUTPUT_PATH = 'WOfS/WOFLs/v2.1.6/combined/'
-LOG_LEVEL = 'INFO'
-FILE_PREFIX = 'S2_WATER_3577'
+INPUT_S3_BUCKET = os.getenv('INPUT_S3_BUCKET',
+                            'dea-public-data')
+INPUT_FILE = os.getenv('INPUT_FILE',
+                       'L2/sentinel-2-nrt/S2MSIARD/2019-03-20/S2A_OPER_MSI_ARD_TL_EPAE_20190320T024743_A019533_T52JEP_N02.07/ARD-METADATA.yaml')
+OUTPUT_S3_BUCKET = os.getenv('OUTPUT_S3_BUCKET',
+                             'dea-public-data')
+OUTPUT_PATH = os.getenv('OUTPUT_PATH',
+                        'WOfS/WOFLs/v2.1.6/combined')
+LOG_LEVEL = os.getenv('LOG_LEVEL',
+                      'INFO')
+FILE_PREFIX = os.getenv('FILE_PREFIX',
+                        'S2_WATER_3577')
+DRY_RUN = os.getenv('DRY_RUN',
+                    None)
 
 
 def _get_log_level(level):
@@ -92,14 +100,22 @@ def _load_data(dc, ds_id):
     :param Datacube dc: An initialised datacube client
     :param str ds_id: The id of the dataset we want to load
     :return: xarray data
-    :return: str extent 
+    :return: str extent
+    :return: dataset source 
     """
 
     logging.info('Loading Dataset %s', ds_id)
     # get the dataset and crs, so we don't change them on load
-    d = dc.index.datasets.get(ds_id)
-    crs = d.crs
-    product = d.type.name
+    source = dc.index.datasets.get(ds_id)
+    crs = source.crs
+    product = source.type.name
+    measurements = [
+        'nbart_blue',
+        'nbart_green',
+        'nbart_red',
+        'nbart_nir_1',
+        'nbart_swir_2',
+        'nbart_swir_3']
 
     # resample to highest band
     res = (-10, 10)
@@ -109,14 +125,35 @@ def _load_data(dc, ds_id):
     logging.debug('Using resolution: %s', str(res))
 
     data = dc.load(product=product,
-                   datasets=[d],
+                   datasets=[source],
                    output_crs=crs,
-                   resolution=res)
+                   resolution=res,
+                   measurements=measurements)
 
-    extent = d.extent
+    # Remove Time Dimension
+    data = data.squeeze()
+
+    extent = source.extent
 
     logging.debug('Loaded Data: %s', data)
-    return data, extent
+    return data, extent, source
+
+
+def _convert_to_numpy(data):
+    """
+    Changes Sentinel 2 band names to Landsat, converts to numpy array
+
+    :param xarray.Dataset data: A Sentinel 2 
+    :return: numpy array data: A 3D numpy array ordered in (bands,rows,columns), containing the spectral data.
+    """
+    return data.rename({
+        'nbart_blue': 'blue',
+        'nbart_green': 'green',
+        'nbart_red': 'red',
+        'nbart_nir_1': 'nir',
+        'nbart_swir_2': 'swir1',
+        'nbart_swir_3': 'swir2'
+    }).to_array(dim='band')
 
 
 def _load_fmask(client, bucket, metadata_path, fmask_path):
@@ -175,7 +212,7 @@ def _mask(water, fmask):
     :param xarray water: The dataset to be masked
     :param xarray fmask: The fmask values
     :param str name: the file path including filename
-    :return: xarray data: masked data 
+    :return: xarray data: masked data
     """
     logging.debug('Masking dataset')
     # fmask: null(0), cloud(2), cloud shadow(3)
@@ -184,28 +221,28 @@ def _mask(water, fmask):
 
 def _generate_filepath(file_prefix, path_prefix, center_time, tile_id):
     """
-    using the prefix, centre_time, and tile_id, create /<prefix>/<yyyy-mm-dd>/<x>/<y>/
+    using the prefix, center_time, and tile_id, create /<prefix>/<yyyy-mm-dd>/<x>/<y>/
 
     :param str prefix: A prefix to be applied to the filepath
-    :param str centre_time: time of recording in iso_8601
+    :param str center_time: time of recording in iso_8601
     :param str tile_id: The NRT Tile id, must end in _AXXXXX_TXXXXX_XXX.XX
     :return: str filepath: the combined filepath
     """
-    # pull the date from the centre_time
-    if not centre_time[-1] is 'Z':
+    # pull the date from the center_time, set it as YYYY-MM-DD
+    if not center_time[-1] is 'Z':
         logging.error(
-            'center_time is in incorrect format, expected an iso_8601 but got: %s', centre_time)
+            'center_time is in incorrect format, expected an iso_8601 but got: %s', center_time)
         sys.exit(1)
-    date = dateutil.parser.parse(centre_time).date()
+    date = dateutil.parser.parse(center_time).date().strftime("%Y-%m-%d")
 
     # we pull the military coords from the yaml path
     s = tile_id.split('_')
 
     # AXXXXX
     x = s[-3]
-    if not x.startswith('A') or not len(x) is 6:
+    if not x.startswith('A') or not len(x) is 7:
         logging.error(
-            'Cannot determine military coords, expected AXXXXXX but got: %s', x)
+            'Cannot determine military coords, expected AXXXXXXX but got: %s', x)
         sys.exit(1)
 
     # TXXXXX
@@ -223,12 +260,12 @@ def _generate_filepath(file_prefix, path_prefix, center_time, tile_id):
     return filepath, filename
 
 
-def _create_metadata_file(dc, product_name, center_time, uri, extent):
+def _create_metadata_file(dc, product_name, center_time, uri, extent, source):
     """
     Create a datacube metadata document
 
     :param Datacube dc: An initialised datacube
-    :param str centre_time: time of recording in iso_8601
+    :param str center_time: time of recording in iso_8601
     :param str uri: the path from metadata doc, to dataset files (just the filename)
     :return: str metadata_doc: the contents of the metadata doc
     """
@@ -237,9 +274,9 @@ def _create_metadata_file(dc, product_name, center_time, uri, extent):
 
     product = dc.index.products.get_by_name(product_name)
 
-    dts = make_dataset(product=product, sources=self.factor_sources,
+    dts = make_dataset(product=product, sources=[source],
                        extent=extent, center_time=center_time, uri=uri)
-
+    logging.debug(dts)
     metadata = pyyaml.dump(
         dts.metadata_doc, Dumper=SafeDumper, encoding='utf-8')
     return metadata
@@ -269,18 +306,19 @@ if __name__ == '__main__':
     metadata = _read_yaml(s3, INPUT_S3_BUCKET, INPUT_FILE)
 
     # Load data
-    data, extent = _load_data(dc, metadata['id'])
+    data, extent, source = _load_data(dc, metadata['id'])
+    formatted_data = _convert_to_numpy(data)
     fmask = _load_fmask(s3, INPUT_S3_BUCKET, INPUT_FILE,
                         metadata['image']['bands']['fmask']['path'])
 
     # Classify it
-    water = _classify(data)
+    water = _classify(formatted_data)
 
     # Get file naming config
     filename, s3_filepath = _generate_filepath(
         FILE_PREFIX,
         OUTPUT_PATH,
-        metadata['centre_dt'],
+        metadata['extent']['center_dt'],
         metadata['tile_id'])
 
     masked_filename = filename + '_water.tiff'
@@ -288,9 +326,10 @@ if __name__ == '__main__':
     metadata_doc = _create_metadata_file(
         dc,
         'wofs_nrt',
-        metadata['centre_dt'],
+        metadata['extent']['center_dt'],
         masked_filename,
-        extent
+        extent,
+        source
     )
 
     # Save to local system as COG

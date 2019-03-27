@@ -1,12 +1,16 @@
 FROM opendatacube/datacube-core:latest
 
-RUN pip3 install --index-url https://packages.dea.gadevs.ga/ wofs
+RUN pip3 install --index-url https://packages.dea.gadevs.ga/ wofs && \
+    pip3 install ruamel.yaml
 
 # Define example env variables so users know how to use this image
 ENV INPUT_S3_BUCKET="dea-public-data" \
     INPUT_FILE="/L2/sentinel-2-nrt/S2MSIARD/2019-03-20/S2A_OPER_MSI_ARD_TL_EPAE_20190320T024743_A019533_T52JEP_N02.07/ARD-METADATA.yaml" \
     OUTPUT_S3_BUCKET="dea-public-data" \
+    OUTPUT_PATH="WOfS/WOFLs/v2.1.6/combined" \
     LOG_LEVEL="INFO" \
+    FILE_PREFIX="S2_WATER_3577" \
+    DRY_RUN="False" \
     DB_HOSTNAME="localhost" \
     DB_PORT="5432" \
     DB_USERNAME="cube" \
@@ -14,4 +18,4 @@ ENV INPUT_S3_BUCKET="dea-public-data" \
 
 COPY run.py run.py
 
-ENTRYPOINT [ "python3", "run.py" ]
+CMD [ "python3", "run.py" ]
