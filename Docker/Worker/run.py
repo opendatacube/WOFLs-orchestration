@@ -267,6 +267,7 @@ def _create_metadata_file(dc, product_name, center_time, uri, extent, source):
     :param Datacube dc: An initialised datacube
     :param str center_time: time of recording in iso_8601
     :param str uri: the path from metadata doc, to dataset files (just the filename)
+    :param Dataset source: the source dataset
     :return: str metadata_doc: the contents of the metadata doc
     """
     # from https://github.com/GeoscienceAustralia/wofs-confidence/blob/master/confidence/wofs_filtered.py
@@ -276,7 +277,6 @@ def _create_metadata_file(dc, product_name, center_time, uri, extent, source):
 
     dts = make_dataset(product=product, sources=[source],
                        extent=extent, center_time=center_time, uri=uri)
-    logging.debug(dts)
     metadata = pyyaml.dump(
         dts.metadata_doc, Dumper=SafeDumper, encoding='utf-8')
     return metadata
