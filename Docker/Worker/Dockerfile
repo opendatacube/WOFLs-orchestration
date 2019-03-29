@@ -10,7 +10,6 @@ ENV INPUT_S3_BUCKET="dea-public-data" \
     OUTPUT_PATH="WOfS/WOFLs/v2.1.6/combined" \
     LOG_LEVEL="INFO" \
     FILE_PREFIX="S2_WATER_3577" \
-    DRY_RUN="False" \
     DB_HOSTNAME="localhost" \
     DB_PORT="5432" \
     DB_USERNAME="cube" \

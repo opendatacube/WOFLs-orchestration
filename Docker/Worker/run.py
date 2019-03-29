@@ -19,6 +19,7 @@ from wofs import classifier
 from datacube import helpers
 from datacube.utils import geometry
 from datacube.model.utils import make_dataset
+from datacube.api.geo_xarray import reproject_like
 import xarray as xr
 from ruamel.yaml import YAML
 import logging
@@ -44,8 +45,6 @@ LOG_LEVEL = os.getenv('LOG_LEVEL',
                       'INFO')
 FILE_PREFIX = os.getenv('FILE_PREFIX',
                         'S2_WATER_3577')
-DRY_RUN = os.getenv('DRY_RUN',
-                    None)
 
 
 def _get_log_level(level):
@@ -93,7 +92,7 @@ def _read_yaml(client, bucket, path):
     return data
 
 
-def _load_data(dc, ds_id):
+def _load_data(dc, ds_id, measurements):
     """
     loads data from a single dataset, in it's original crs
 
@@ -109,13 +108,6 @@ def _load_data(dc, ds_id):
     source = dc.index.datasets.get(ds_id)
     crs = source.crs
     product = source.type.name
-    measurements = [
-        'nbart_blue',
-        'nbart_green',
-        'nbart_red',
-        'nbart_nir_1',
-        'nbart_swir_2',
-        'nbart_swir_3']
 
     # resample to highest band
     res = (-10, 10)
@@ -201,6 +193,7 @@ def _save(ds, name):
     :param xarray ds: An xarray
     :param str name: the file path including filename
     """
+    logging.debug(ds)
     logging.info('Writing file: %s', name)
     helpers.write_geotiff(name, ds)
 
@@ -214,9 +207,13 @@ def _mask(water, fmask):
     :param str name: the file path including filename
     :return: xarray data: masked data
     """
-    logging.debug('Masking dataset')
+
+    logging.info('Masking dataset')
     # fmask: null(0), cloud(2), cloud shadow(3)
-    return water.where(~(fmask.isin([0, 2, 3])))
+    masked = water.where(~(fmask.isin([0, 2, 3])))
+    logging.debug('Masked Data')
+    logging.debug(masked)
+    return masked
 
 
 def _generate_filepath(file_prefix, path_prefix, center_time, tile_id):
@@ -255,7 +252,7 @@ def _generate_filepath(file_prefix, path_prefix, center_time, tile_id):
     filepath = path_prefix + '/' + date + '/' + x + '/' + y + '/'
     logging.info('Using remote filepath: %s', filepath)
 
-    filename = file_prefix + '_' + center_time + '_' + x + '_' + y
+    filename = file_prefix + '_' + date + '_' + x + '_' + y
 
     return filepath, filename
 
@@ -270,13 +267,17 @@ def _create_metadata_file(dc, product_name, center_time, uri, extent, source):
     :param Dataset source: the source dataset
     :return: str metadata_doc: the contents of the metadata doc
     """
-    # from https://github.com/GeoscienceAustralia/wofs-confidence/blob/master/confidence/wofs_filtered.py
-    # Compute metadata
 
+    # Find product
     product = dc.index.products.get_by_name(product_name)
+    if product is None:
+        logging.error('Could not find product %s in datacube', product_name)
 
+    # Create a new dataset
     dts = make_dataset(product=product, sources=[source],
                        extent=extent, center_time=center_time, uri=uri)
+
+    # Convert metadata to yaml
     metadata = pyyaml.dump(
         dts.metadata_doc, Dumper=SafeDumper, encoding='utf-8')
     return metadata
@@ -287,10 +288,10 @@ def _upload(client, bucket, remote_path, local_file=None, data=None):
     if local_file is not None:
         data = open(local_file, 'rb')
 
-    client.put_object(
+    client.meta.client.upload_fileobj(
+        Fileobj=data,
         Bucket=bucket,
-        Key=remote_path,
-        Body=data
+        Key=remote_path
     )
 
 
@@ -306,16 +307,25 @@ if __name__ == '__main__':
     metadata = _read_yaml(s3, INPUT_S3_BUCKET, INPUT_FILE)
 
     # Load data
-    data, extent, source = _load_data(dc, metadata['id'])
+    measurements = [
+        'nbart_blue',
+        'nbart_green',
+        'nbart_red',
+        'nbart_nir_1',
+        'nbart_swir_2',
+        'nbart_swir_3']
+
+    data, extent, source = _load_data(dc, metadata['id'], measurements)
     formatted_data = _convert_to_numpy(data)
-    fmask = _load_fmask(s3, INPUT_S3_BUCKET, INPUT_FILE,
-                        metadata['image']['bands']['fmask']['path'])
+    fmask, fextent, fsource = _load_data(dc, metadata['id'], ['fmask'])
+    # fmask = _load_fmask(s3, INPUT_S3_BUCKET, INPUT_FILE,
+    #                     metadata['image']['bands']['fmask']['path'])
 
     # Classify it
     water = _classify(formatted_data)
 
     # Get file naming config
-    filename, s3_filepath = _generate_filepath(
+    s3_filepath, filename = _generate_filepath(
         FILE_PREFIX,
         OUTPUT_PATH,
         metadata['extent']['center_dt'],
@@ -323,29 +333,35 @@ if __name__ == '__main__':
 
     masked_filename = filename + '_water.tiff'
 
+    # Create metadata doc
     metadata_doc = _create_metadata_file(
         dc,
-        'wofs_nrt',
+        'wofs_albers',
         metadata['extent']['center_dt'],
         masked_filename,
         extent,
         source
     )
 
-    # Save to local system as COG
-    _save(water, './' + filename + '_raw_water.tiff')
-    _save(_mask(water, fmask), './' + masked_filename)
+    # Mask
+    masked_data = _mask(water, fmask)
 
-    # Upload data to S3
-    _upload(s3,
-            OUTPUT_S3_BUCKET,
-            s3_filepath + '/' + masked_filename,
-            local_file='./' + masked_filename)
+    dtypes = {val.dtype for val in masked_data.data_vars.values()}
+    if len(dtypes) is 1:
+        _save(masked_data, './' + masked_filename)
 
-    # Upload metadata to S3
-    _upload(s3,
-            OUTPUT_S3_BUCKET,
-            s3_filepath + '/ARD_METADATA.yaml',
-            data=metadata_doc)
+        # Upload data to S3
+        _upload(s3,
+                OUTPUT_S3_BUCKET,
+                s3_filepath + masked_filename,
+                local_file='./' + masked_filename)
 
-    logging.info('Done!')
+        # Upload metadata to S3
+        _upload(s3,
+                OUTPUT_S3_BUCKET,
+                s3_filepath + 'ARD_METADATA.yaml',
+                data=metadata_doc)
+
+        logging.info('Done!')
+    else:
+        logging.info('No valid water data found')
