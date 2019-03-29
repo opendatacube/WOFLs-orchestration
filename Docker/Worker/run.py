@@ -5,7 +5,7 @@ Converts a Sentinel 2 Granule to a WOFS Observation
 This script will take the location of a dataset yaml file, and output a WOFS Observation to an s3 bucket.
 it requires a datacube with the Sentinel 2 Granule indexed.
 
-Last Change: 2019/03/27
+Last Change: 2019/03/29
 Authors: Belle Tissot & Tom Butler
 """
 
@@ -100,7 +100,7 @@ def _load_data(dc, ds_id, measurements):
     :param str ds_id: The id of the dataset we want to load
     :return: xarray data
     :return: str extent
-    :return: dataset source 
+    :return: dataset source
     """
 
     logging.info('Loading Dataset %s', ds_id)
@@ -135,7 +135,7 @@ def _convert_to_numpy(data):
     """
     Changes Sentinel 2 band names to Landsat, converts to numpy array
 
-    :param xarray.Dataset data: A Sentinel 2 
+    :param xarray.Dataset data: A Sentinel 2
     :return: numpy array data: A 3D numpy array ordered in (bands,rows,columns), containing the spectral data.
     """
     return data.rename({
@@ -210,7 +210,7 @@ def _mask(water, fmask):
 
     logging.info('Masking dataset')
     # fmask: null(0), cloud(2), cloud shadow(3)
-    masked = water.where(~(fmask.isin([0, 2, 3])))
+    masked = water.where(~(fmask.fmask.isin([0, 2, 3])), 0)
     logging.debug('Masked Data')
     logging.debug(masked)
     return masked
@@ -317,37 +317,40 @@ if __name__ == '__main__':
 
     data, extent, source = _load_data(dc, metadata['id'], measurements)
     formatted_data = _convert_to_numpy(data)
+
+    # Load fmask
     fmask, fextent, fsource = _load_data(dc, metadata['id'], ['fmask'])
-    # fmask = _load_fmask(s3, INPUT_S3_BUCKET, INPUT_FILE,
-    #                     metadata['image']['bands']['fmask']['path'])
 
     # Classify it
     water = _classify(formatted_data)
 
-    # Get file naming config
-    s3_filepath, filename = _generate_filepath(
-        FILE_PREFIX,
-        OUTPUT_PATH,
-        metadata['extent']['center_dt'],
-        metadata['tile_id'])
-
-    masked_filename = filename + '_water.tiff'
-
-    # Create metadata doc
-    metadata_doc = _create_metadata_file(
-        dc,
-        'wofs_albers',
-        metadata['extent']['center_dt'],
-        masked_filename,
-        extent,
-        source
-    )
-
     # Mask
     masked_data = _mask(water, fmask)
 
+    # Check we have valid water data
     dtypes = {val.dtype for val in masked_data.data_vars.values()}
+
     if len(dtypes) is 1:
+
+            # Get file naming config
+        s3_filepath, filename = _generate_filepath(
+            FILE_PREFIX,
+            OUTPUT_PATH,
+            metadata['extent']['center_dt'],
+            metadata['tile_id'])
+
+        masked_filename = filename + '_water.tiff'
+
+        # Create metadata doc
+        metadata_doc = _create_metadata_file(
+            dc,
+            'wofs_albers',
+            metadata['extent']['center_dt'],
+            masked_filename,
+            extent,
+            source
+        )
+
         _save(masked_data, './' + masked_filename)
 
         # Upload data to S3
