@@ -234,12 +234,13 @@ def _generate_filepath(file_prefix, path_prefix, center_time, tile_id):
 
     # Remove the '.' character from filename
     tile_id = tile_id.replace('.', '-', 1)
-    filename = file_prefix + '_' + date + '_' + tile_id
+    filename = file_prefix + date + '_' + tile_id
 
     return filepath, filename
 
 
 def _convert_to_cog(input_file, output_file):
+    logging.debug('converting to COG')
     convert_args = ['rio',
                     'cogeo',
                     'create',
@@ -261,7 +262,7 @@ def _convert_to_cog(input_file, output_file):
             e.cmd, e.returncode, e.output))
 
 
-def _create_metadata_file(dc, product_name, uri, extent, source, source_metadata):
+def _create_metadata_file(dc, product_name, uri, extent, source, source_metadata, filename):
     """
     Create a datacube metadata document
 
@@ -271,6 +272,7 @@ def _create_metadata_file(dc, product_name, uri, extent, source, source_metadata
     :param Dataset source: the source dataset
     :return: str metadata_doc: the contents of the metadata doc
     """
+    logging.debug('Creating metadata file')
     # Get Time
     center_time = source_metadata['extent']['center_dt']
 
@@ -293,7 +295,7 @@ def _create_metadata_file(dc, product_name, uri, extent, source, source_metadata
     logging.debug(metadata_doc)
 
     # Convert metadata to yaml
-    with open('./ARD_METADATA.yaml', 'w') as f:
+    with open(filename, 'w') as f:
         yaml = YAML(typ='safe', pure=False)
         yaml.default_flow_style = False
         yaml.dump(metadata_doc, f)
@@ -364,7 +366,8 @@ def main(input_file):
             masked_filename,
             extent,
             source,
-            metadata
+            metadata,
+            './WATER_METADATA.yaml'
         )
 
         # Upload data to S3
