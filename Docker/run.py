@@ -5,32 +5,26 @@ Converts a Sentinel 2 Granule to a WOFS Observation
 This script will take the location of a dataset yaml file, and output a WOFS Observation to an s3 bucket.
 it requires a datacube with the Sentinel 2 Granule indexed.
 
-Last Change: 2019/03/29
+Last Change: 2019/04/01
 Authors: Belle Tissot & Tom Butler
 """
 
-import yaml as pyyaml
 import datacube
 import os
 import sys
+import logging
 import boto3
 import dateutil.parser
+import xarray as xr
 from wofs import classifier
 from datacube import helpers
 from datacube.utils import geometry
 from datacube.model.utils import make_dataset
-from datacube.api.geo_xarray import reproject_like
-import xarray as xr
 from ruamel.yaml import YAML
-import logging
-from datacube.utils.geometry import GeoBox
-from affine import Affine
 from pathlib import Path
+import subprocess
+from subprocess import check_call
 
-try:
-    from yaml import CSafeDumper as SafeDumper
-except ImportError:
-    from yaml import SafeDumper
 
 # This will be run in docker, so we load config from env vars
 INPUT_S3_BUCKET = os.getenv('INPUT_S3_BUCKET',
@@ -44,7 +38,7 @@ OUTPUT_PATH = os.getenv('OUTPUT_PATH',
 LOG_LEVEL = os.getenv('LOG_LEVEL',
                       'INFO')
 FILE_PREFIX = os.getenv('FILE_PREFIX',
-                        'S2_WATER_3577')
+                        '')
 
 
 def _get_log_level(level):
@@ -218,13 +212,16 @@ def _mask(water, fmask):
 
 def _generate_filepath(file_prefix, path_prefix, center_time, tile_id):
     """
-    using the prefix, center_time, and tile_id, create /<prefix>/<yyyy-mm-dd>/<x>/<y>/
+    using the prefix, center_time, and tile_id, create /<prefix>/<yyyy-mm-dd>/wofs_tile_id/
 
     :param str prefix: A prefix to be applied to the filepath
     :param str center_time: time of recording in iso_8601
-    :param str tile_id: The NRT Tile id, must end in _AXXXXX_TXXXXX_XXX.XX
+    :param str tile_id: The NRT Tile id
     :return: str filepath: the combined filepath
     """
+    tile_id = tile_id.replace('_L1C_', '_WATER_', 1)
+    tile_id = tile_id.replace('_ARD_', '_WATER_', 1)
+
     # pull the date from the center_time, set it as YYYY-MM-DD
     if not center_time[-1] is 'Z':
         logging.error(
@@ -232,32 +229,39 @@ def _generate_filepath(file_prefix, path_prefix, center_time, tile_id):
         sys.exit(1)
     date = dateutil.parser.parse(center_time).date().strftime("%Y-%m-%d")
 
-    # we pull the military coords from the yaml path
-    s = tile_id.split('_')
-
-    # AXXXXX
-    x = s[-3]
-    if not x.startswith('A') or not len(x) is 7:
-        logging.error(
-            'Cannot determine military coords, expected AXXXXXXX but got: %s', x)
-        sys.exit(1)
-
-    # TXXXXX
-    y = s[-2]
-    if not y.startswith('T') or not len(y) is 6:
-        logging.error(
-            'Cannot determine military coords, expected TXXXXXX but got: %s', y)
-        sys.exit(1)
-
-    filepath = path_prefix + '/' + date + '/' + x + '/' + y + '/'
+    filepath = path_prefix + '/' + date + '/' + tile_id + '/'
     logging.info('Using remote filepath: %s', filepath)
 
-    filename = file_prefix + '_' + date + '_' + x + '_' + y
+    # Remove the '.' character from filename
+    tile_id = tile_id.replace('.', '-', 1)
+    filename = file_prefix + '_' + date + '_' + tile_id
 
     return filepath, filename
 
 
-def _create_metadata_file(dc, product_name, center_time, uri, extent, source):
+def _convert_to_cog(input_file, output_file):
+    convert_args = ['rio',
+                    'cogeo',
+                    'create',
+                    '--overview-resampling',
+                    'nearest',
+                    '--overview-blocksize',
+                    '512',
+                    '--co',
+                    'PREDICTOR=2',
+                    '--co',
+                    'ZLEVEL=9',
+                    input_file,
+                    output_file
+                    ]
+    try:
+        check_call(convert_args, stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError("command '{}' return with error (code {}): {}".format(
+            e.cmd, e.returncode, e.output))
+
+
+def _create_metadata_file(dc, product_name, uri, extent, source, source_metadata):
     """
     Create a datacube metadata document
 
@@ -267,6 +271,8 @@ def _create_metadata_file(dc, product_name, center_time, uri, extent, source):
     :param Dataset source: the source dataset
     :return: str metadata_doc: the contents of the metadata doc
     """
+    # Get Time
+    center_time = source_metadata['extent']['center_dt']
 
     # Find product
     product = dc.index.products.get_by_name(product_name)
@@ -277,16 +283,25 @@ def _create_metadata_file(dc, product_name, center_time, uri, extent, source):
     dts = make_dataset(product=product, sources=[source],
                        extent=extent, center_time=center_time, uri=uri)
 
+    # tweak metadata
+    metadata_doc = dts.metadata_doc
+    metadata_doc['instrument'] = source_metadata['instrument']
+    metadata_doc['platform'] = source_metadata['platform']
+    metadata_doc['image']['bands']['water']['path'] = uri
+    metadata_doc['grid_spatial']['projection']['valid_data'] = source_metadata['grid_spatial']['projection']['valid_data']
+
+    logging.debug(metadata_doc)
+
     # Convert metadata to yaml
-    metadata = pyyaml.dump(
-        dts.metadata_doc, Dumper=SafeDumper, encoding='utf-8')
-    return metadata
+    with open('./ARD_METADATA.yaml', 'w') as f:
+        yaml = YAML(typ='safe', pure=False)
+        yaml.default_flow_style = False
+        yaml.dump(metadata_doc, f)
 
 
-def _upload(client, bucket, remote_path, local_file=None, data=None):
+def _upload(client, bucket, remote_path, local_file):
 
-    if local_file is not None:
-        data = open(local_file, 'rb')
+    data = open(local_file, 'rb')
 
     client.meta.client.upload_fileobj(
         Fileobj=data,
@@ -295,8 +310,7 @@ def _upload(client, bucket, remote_path, local_file=None, data=None):
     )
 
 
-if __name__ == '__main__':
-
+def main(input_file):
     # Initialise clients
     s3 = boto3.resource('s3')
     dc = datacube.Datacube(app='WOFL-iron')
@@ -304,7 +318,7 @@ if __name__ == '__main__':
         format='%(asctime)s %(levelname)s %(message)s', level=_get_log_level(LOG_LEVEL))
 
     # get contents of yaml file
-    metadata = _read_yaml(s3, INPUT_S3_BUCKET, INPUT_FILE)
+    metadata = _read_yaml(s3, INPUT_S3_BUCKET, input_file)
 
     # Load data
     measurements = [
@@ -331,8 +345,7 @@ if __name__ == '__main__':
     dtypes = {val.dtype for val in masked_data.data_vars.values()}
 
     if len(dtypes) is 1:
-
-            # Get file naming config
+        # Get file naming config
         s3_filepath, filename = _generate_filepath(
             FILE_PREFIX,
             OUTPUT_PATH,
@@ -340,18 +353,19 @@ if __name__ == '__main__':
             metadata['tile_id'])
 
         masked_filename = filename + '_water.tiff'
+        raw_filename = filename + 'raw.tiff'
+        _save(masked_data, './' + raw_filename)
+        _convert_to_cog(raw_filename, masked_filename)
 
         # Create metadata doc
-        metadata_doc = _create_metadata_file(
+        _create_metadata_file(
             dc,
             'wofs_albers',
-            metadata['extent']['center_dt'],
             masked_filename,
             extent,
-            source
+            source,
+            metadata
         )
-
-        _save(masked_data, './' + masked_filename)
 
         # Upload data to S3
         _upload(s3,
@@ -362,9 +376,13 @@ if __name__ == '__main__':
         # Upload metadata to S3
         _upload(s3,
                 OUTPUT_S3_BUCKET,
-                s3_filepath + 'ARD_METADATA.yaml',
-                data=metadata_doc)
+                s3_filepath + 'WATER_METADATA.yaml',
+                local_file='./WATER_METADATA.yaml')
 
         logging.info('Done!')
     else:
-        logging.info('No valid water data found')
+        logging.error('Something went wrong during masking')
+
+
+if __name__ == '__main__':
+    main(INPUT_FILE)
