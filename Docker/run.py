@@ -24,6 +24,7 @@ from ruamel.yaml import YAML
 from pathlib import Path
 import subprocess
 from subprocess import check_call
+from distutils.util import strtobool
 
 
 # This will be run in docker, so we load config from env vars
@@ -39,6 +40,7 @@ LOG_LEVEL = os.getenv('LOG_LEVEL',
                       'INFO')
 FILE_PREFIX = os.getenv('FILE_PREFIX',
                         '')
+MAKE_PUBLIC = bool(strtobool(os.getenv('MAKE_PUBLIC', 'false').lower()))
 
 
 def _get_log_level(level):
@@ -301,14 +303,24 @@ def _create_metadata_file(dc, product_name, uri, extent, source, source_metadata
         yaml.dump(metadata_doc, f)
 
 
-def _upload(client, bucket, remote_path, local_file):
+def _upload(client, bucket, remote_path, local_file, makepublic=False, mimetype=None):
 
     data = open(local_file, 'rb')
+
+    extra_args = dict()
+
+    if makepublic:
+        extra_args['ACL'] = 'public-read'
+    if mimetype is not None:
+        extra_args['ContentType'] = mimetype
+
+    args = { 'ExtraArgs': extra_args }
 
     client.meta.client.upload_fileobj(
         Fileobj=data,
         Bucket=bucket,
-        Key=remote_path
+        Key=remote_path,
+        **args
     )
 
 
@@ -374,13 +386,17 @@ def main(input_file):
         _upload(s3,
                 OUTPUT_S3_BUCKET,
                 s3_filepath + masked_filename,
-                local_file='./' + masked_filename)
+                local_file='./' + masked_filename,
+                makepublic=MAKE_PUBLIC,
+                mimetype="image/tiff")
 
         # Upload metadata to S3
         _upload(s3,
                 OUTPUT_S3_BUCKET,
                 s3_filepath + 'WATER_METADATA.yaml',
-                local_file='./WATER_METADATA.yaml')
+                local_file='./WATER_METADATA.yaml',
+                makepublic=MAKE_PUBLIC,
+                mimetype="application/x-yaml")
 
         logging.info('Done!')
     else:

@@ -17,7 +17,8 @@ ENV INPUT_S3_BUCKET="dea-public-data" \
     SQS_MESSAGE_PREFIX="/L2/sentinel-2-nrt/S2MSIARD/" \
     SQS_POLL_TIME_SEC=60 \
     JOB_MAX_TIME_SEC=300 \
-    MAX_JOB_PER_WORKER=1
+    MAX_JOB_PER_WORKER=1 \
+    MAKE_PUBLIC="true"
 
 COPY watch-queue.py watch-queue.py
 COPY run.py run.py
