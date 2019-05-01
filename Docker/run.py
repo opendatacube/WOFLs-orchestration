@@ -248,6 +248,8 @@ def _convert_to_cog(input_file, output_file):
                     'create',
                     '--overview-resampling',
                     'nearest',
+                    '--overview-blocksize',
+                    '256',
                     '--co',
                     'PREDICTOR=2',
                     '--co',
