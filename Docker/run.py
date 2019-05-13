@@ -9,23 +9,28 @@ Last Change: 2019/04/01
 Authors: Belle Tissot & Tom Butler
 """
 
-import datacube
-import os
-import sys
 import logging
-import boto3
-import dateutil.parser
-import xarray as xr
-from wofs import classifier
-from datacube import helpers
-from datacube.utils import geometry
-from datacube.model.utils import make_dataset
-from ruamel.yaml import YAML
-from pathlib import Path
+import os
 import subprocess
-from subprocess import check_call
+import sys
+import uuid
 from distutils.util import strtobool
+from pathlib import Path
+from subprocess import check_call
 
+import boto3
+import datacube
+import dateutil.parser
+import numpy as np
+import xarray as xr
+from datacube import helpers
+from datacube.model.utils import make_dataset
+from datacube.storage import masking
+from datacube.utils import geometry
+from ruamel.yaml import YAML
+from rio_cogeo.cogeo import cog_translate
+
+from wofs import classifier
 
 # This will be run in docker, so we load config from env vars
 INPUT_S3_BUCKET = os.getenv('INPUT_S3_BUCKET',
@@ -42,6 +47,24 @@ FILE_PREFIX = os.getenv('FILE_PREFIX',
                         '')
 MAKE_PUBLIC = bool(strtobool(os.getenv('MAKE_PUBLIC', 'false').lower()))
 
+# COG profile
+cog_profile = {
+    'driver': 'GTiff',
+    'interleave': 'pixel',
+    'tiled': True,
+    'blockxsize': 512,
+    'blockysize': 512,
+    'compress': 'DEFLATE',
+    'predictor': 2,
+    'zlevel': 9,
+    'nodata': 1
+}
+
+
+def _get_s3_url(bucket_name, obj_key):
+    return 's3://{bucket_name}/{obj_key}'.format(
+        bucket_name=bucket_name, obj_key=obj_key)
+
 
 def _get_log_level(level):
     """
@@ -57,6 +80,15 @@ def _get_log_level(level):
         'ERROR': logging.ERROR,
         'CRITICAL': logging.CRITICAL,
     }.get(level, logging.INFO)
+
+def _read_xml(dc, bucket, path):
+    logging.info('Loading xml: %s', _get_s3_url(bucket, path))
+
+    dataset_id =  str(uuid.uuid5(uuid.NAMESPACE_URL, _get_s3_url(bucket, path)))
+
+    dataset = dc.index.datasets.get(dataset_id)
+
+    return dataset.metadata_doc
 
 
 def _read_yaml(client, bucket, path):
@@ -106,7 +138,7 @@ def _load_data(dc, ds_id, measurements):
     product = source.type.name
 
     # resample to highest band
-    res = (-10, 10)
+    res = (-30, 30)
     # res = d.measurements['fmask']['info']['geotransform'][5], d.measurements['fmask']['info']['geotransform'][1]
 
     logging.debug('Using CRS: %s', crs)
@@ -123,7 +155,7 @@ def _load_data(dc, ds_id, measurements):
 
     extent = source.extent
 
-    logging.debug('Loaded Data: %s', data)
+    logging.info('Loaded Data: %s', data)
     return data, extent, source
 
 
@@ -135,34 +167,13 @@ def _convert_to_numpy(data):
     :return: numpy array data: A 3D numpy array ordered in (bands,rows,columns), containing the spectral data.
     """
     return data.rename({
-        'nbart_blue': 'blue',
-        'nbart_green': 'green',
-        'nbart_red': 'red',
-        'nbart_nir_1': 'nir',
-        'nbart_swir_2': 'swir1',
-        'nbart_swir_3': 'swir2'
+        'blue': 'blue',
+        'green': 'green',
+        'red': 'red',
+        'nir': 'nir',
+        'swir1': 'swir1',
+        'swir2': 'swir2'
     }).to_array(dim='band')
-
-
-def _load_fmask(client, bucket, metadata_path, fmask_path):
-    """
-    loads fmask from s3
-
-    :param boto3.resource client: An initialised s3 client
-    :param str bucket: The name of the s3 bucket
-    :param str metadata_path: The filepath of the yaml file in the bucket
-    :param str fmask_path: The relative path of fmask from the yaml file
-    :return: xarray data
-    """
-    # create a path to the fmask file
-    basepath, filename = os.path.split(metadata_path)
-    path = 's3://' + bucket + '/' + basepath + '/' + fmask_path
-
-    logging.info('Loading fmask from: %s', path)
-
-    # Read the file from S3
-    with xr.open_rasterio(path) as data:
-        return data
 
 
 def _classify(data):
@@ -177,7 +188,7 @@ def _classify(data):
     logging.info('Classification complete')
     logging.debug(water)
     water.attrs['crs'] = geometry.CRS(data.attrs['crs'])
-    logging.debug('Set CRS to: %s', data.attrs['crs'])
+    logging.info('Set CRS to: %s', data.attrs['crs'])
 
     return water
 
@@ -192,6 +203,19 @@ def _save(ds, name):
     logging.debug(ds)
     logging.info('Writing file: %s', name)
     helpers.write_geotiff(name, ds)
+
+
+def _mask_landsat(water, pixel_qa):
+    logging.info('Masking dataset')
+    clean_pixel_mask = masking.make_mask(
+        pixel_qa,
+        cloud='no_cloud',
+        cloud_shadow='no_cloud_shadow',
+        nodata=False
+    ).to_array()
+
+    masked = water.where(clean_pixel_mask)
+    return masked
 
 
 def _mask(water, fmask):
@@ -242,7 +266,7 @@ def _generate_filepath(file_prefix, path_prefix, center_time, tile_id):
 
 
 def _convert_to_cog(input_file, output_file):
-    logging.debug('converting to COG')
+    logging.info('converting to COG')
     convert_args = ['rio',
                     'cogeo',
                     'create',
@@ -274,7 +298,7 @@ def _create_metadata_file(dc, product_name, uri, extent, source, source_metadata
     :param Dataset source: the source dataset
     :return: str metadata_doc: the contents of the metadata doc
     """
-    logging.debug('Creating metadata file')
+    logging.info('Creating metadata file')
     # Get Time
     center_time = source_metadata['extent']['center_dt']
 
@@ -284,15 +308,17 @@ def _create_metadata_file(dc, product_name, uri, extent, source, source_metadata
         logging.error('Could not find product %s in datacube', product_name)
 
     # Create a new dataset
-    dts = make_dataset(product=product, sources=[source],
-                       extent=extent, center_time=center_time, uri=uri)
+    dts = make_dataset(
+        product=product, sources=[source],
+        extent=extent, center_time=center_time, uri=uri
+    )
 
     # tweak metadata
     metadata_doc = dts.metadata_doc
     metadata_doc['instrument'] = source_metadata['instrument']
     metadata_doc['platform'] = source_metadata['platform']
     metadata_doc['image']['bands']['water']['path'] = uri
-    metadata_doc['grid_spatial']['projection']['valid_data'] = source_metadata['grid_spatial']['projection']['valid_data']
+    # metadata_doc['grid_spatial']['projection']['valid_data'] = source_metadata['grid_spatial']['projection']['valid_data']
 
     logging.debug(metadata_doc)
 
@@ -323,6 +349,37 @@ def _upload(client, bucket, remote_path, local_file, makepublic=False, mimetype=
         **args
     )
 
+def _pq_filter(pixel_qa):
+    # From: https://github.com/bellemae/dea_bits/blob/master/TestWOfSbits.py
+    NO_DATA = 1 << 0   # (dec 1)   bit 0: 1=pixel masked out due to NO_DATA in NBAR source, 0=valid data in NBAR
+    MASKED_CLOUD = 1 << 6   # (dec 64)  bit 6: 1=pixel masked out due to cloud
+    MASKED_CLOUD_SHADOW = 1 << 5   # (dec 32)  bit 5: 1=pixel masked out due to cloud shadow
+
+    masked = np.zeros(pixel_qa.shape, dtype=np.uint8)
+    masked[masking.make_mask(pixel_qa, nodata=True)] += NO_DATA
+    masked[masking.make_mask(pixel_qa, cloud='cloud')] += MASKED_CLOUD
+    masked[masking.make_mask(pixel_qa, cloud_shadow='cloud_shadow')] += MASKED_CLOUD_SHADOW
+
+    return masked
+
+def _mask_and_classify_landsat(data):
+    # Create a mask, with bits set as per the WOFS data from GA
+    mask = _pq_filter(data.pixel_qa)
+
+    # Get the classified water out of the fancy magic decision tree
+    bands = ['blue', 'green', 'red', 'nir', 'swir1', 'swir2']
+    wofs_premask = classifier.classify(data[bands].to_array(dim='band'))
+
+    # It creates water where there's nodata, so mask that out
+    nodata_mask = masking.make_mask(data.pixel_qa, nodata=False)
+    wofs = wofs_premask.where(nodata_mask).astype(dtype=np.uint8)
+    
+    # Return the bitwise or to combine them
+    wofl = wofs | mask
+    wofl_dataset = wofl.to_dataset(name='wofl')
+    wofl_dataset.attrs['crs'] = geometry.CRS(data.attrs['crs'])
+    return wofl_dataset
+
 
 def main(input_file):
     # Initialise clients
@@ -332,49 +389,53 @@ def main(input_file):
         format='%(asctime)s %(levelname)s %(message)s', level=_get_log_level(LOG_LEVEL))
 
     # get contents of yaml file
-    metadata = _read_yaml(s3, INPUT_S3_BUCKET, input_file)
+    # metadata = _read_yaml(s3, INPUT_S3_BUCKET, input_file)
+    metadata = _read_xml(dc, INPUT_S3_BUCKET, input_file)
 
     # Load data
     measurements = [
-        'nbart_blue',
-        'nbart_green',
-        'nbart_red',
-        'nbart_nir_1',
-        'nbart_swir_2',
-        'nbart_swir_3']
+        'blue',
+        'green',
+        'red',
+        'nir',
+        'swir1',
+        'swir2',
+        'pixel_qa'
+    ]
 
     data, extent, source = _load_data(dc, metadata['id'], measurements)
-    formatted_data = _convert_to_numpy(data)
-
-    # Load fmask
-    fmask, fextent, fsource = _load_data(dc, metadata['id'], ['fmask'])
-
-    # Classify it
-    water = _classify(formatted_data)
-
-    # Mask
-    masked_data = _mask(water, fmask)
+    masked_data = _mask_and_classify_landsat(data)
 
     # Check we have valid water data
     dtypes = {val.dtype for val in masked_data.data_vars.values()}
+    logging.info("Created a new layer with {} data types.".format(dtypes))
 
     if len(dtypes) is 1:
         # Get file naming config
-        s3_filepath, filename = _generate_filepath(
-            FILE_PREFIX,
-            OUTPUT_PATH,
-            metadata['extent']['center_dt'],
-            metadata['tile_id'])
+        # case-studies/usgs/LANDSAT_8/172/61/2013/06/20/LC08_L1TP_172061_20130620_20170503_01_T1.xml
+        file_path = input_file.split('usgs/')[1].strip(".xml")
+        # LANDSAT_8/172/61/2013/06/20/LC08_L1TP_172061_20130620_20170503_01_T1
+        filename = file_path.split('/')[-1]
+
+        s3_filepath = file_path.split(filename)[0]
+        filename = filename.replace('L1TP', 'WATER')
 
         masked_filename = filename + '_water.tiff'
-        raw_filename = filename + 'raw.tiff'
-        _save(masked_data, './' + raw_filename)
-        _convert_to_cog(raw_filename, masked_filename)
+        raw_filename = filename + '_raw.tiff'
+        logging.info("Raw file: {}, COG file: {}, S3 path: {}".format(raw_filename, masked_filename, s3_filepath))
+        _save(masked_data.squeeze().astype("uint8"), './' + raw_filename)
+        cog_translate(
+            raw_filename,
+            masked_filename,
+            cog_profile,
+            overview_level=5,
+            overview_resampling='nearest'
+        )
 
         # Create metadata doc
         _create_metadata_file(
             dc,
-            'wofs_albers',
+            'ls_usgs_wofs',
             masked_filename,
             extent,
             source,
@@ -383,20 +444,24 @@ def main(input_file):
         )
 
         # Upload data to S3
-        _upload(s3,
-                OUTPUT_S3_BUCKET,
-                s3_filepath + masked_filename,
-                local_file='./' + masked_filename,
-                makepublic=MAKE_PUBLIC,
-                mimetype="image/tiff")
+        _upload(
+            s3,
+            OUTPUT_S3_BUCKET,
+            s3_filepath + masked_filename,
+            local_file='./' + masked_filename,
+            makepublic=MAKE_PUBLIC,
+            mimetype="image/tiff"
+        )
 
         # Upload metadata to S3
-        _upload(s3,
-                OUTPUT_S3_BUCKET,
-                s3_filepath + 'WATER_METADATA.yaml',
-                local_file='./WATER_METADATA.yaml',
-                makepublic=MAKE_PUBLIC,
-                mimetype="application/x-yaml")
+        _upload(
+            s3,
+            OUTPUT_S3_BUCKET,
+            s3_filepath + 'WATER_METADATA.yaml',
+            local_file='./WATER_METADATA.yaml',
+            makepublic=MAKE_PUBLIC,
+            mimetype="application/x-yaml"
+        )
 
         logging.info('Done!')
     else:

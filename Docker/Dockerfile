@@ -1,5 +1,9 @@
 FROM opendatacube/datacube-core:latest
 
+RUN mkdir -p /opt/data && \
+    mkdir -p /opt/scripts
+WORKDIR /opt/data
+
 RUN pip3 install --index-url https://packages.dea.gadevs.ga/ wofs && \
     pip3 install ruamel.yaml rio-cogeo
 
@@ -15,12 +19,13 @@ ENV INPUT_S3_BUCKET="dea-public-data" \
     DB_PASSWORD="" \
     SQS_QUEUE_URL="wofs" \
     SQS_MESSAGE_PREFIX="/L2/sentinel-2-nrt/S2MSIARD/" \
-    SQS_POLL_TIME_SEC=60 \
+    SQS_POLL_TIME_SEC=20 \
     JOB_MAX_TIME_SEC=300 \
     MAX_JOB_PER_WORKER=1 \
-    MAKE_PUBLIC="true"
+    MAKE_PUBLIC="True"
 
-COPY watch-queue.py watch-queue.py
-COPY run.py run.py
+COPY watch-queue.py run.py /opt/scripts/
+RUN chmod +x /opt/scripts/*.py && \
+    ln -s /opt/scripts/watch-queue.py /usr/local/bin/watch-queue.py
 
-CMD [ "python3", "watch-queue.py" ]
+CMD [ "watch-queue.py" ]
