@@ -10,7 +10,7 @@ services:
     
       - INPUT_S3_BUCKET=frontiersi-odc-data
       - OUTPUT_S3_BUCKET=test.data.frontiersi.io
-      - OUTPUT_PATH=case-studies/WOfS/WOFLs/v2.1.6/combined
+      - OUTPUT_PATH=usgs/wofs
 
       - SQS_QUEUE_URL=landsat-to-wofs
 

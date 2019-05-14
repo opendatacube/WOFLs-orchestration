@@ -52,7 +52,6 @@ def get_items(limit=10, suffix=''):
     logging.info("Adding {} items from: {}/{} to the queue {}".format(limit, BUCKET, PATH, QUEUE))
     items = get_matching_s3_keys(BUCKET, PATH, suffix=suffix)
     for item in items:
-        logging.info("Adding item {} which is the {}st item".format(item, count))
         count += 1
         if count >= limit:
             break

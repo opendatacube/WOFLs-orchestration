@@ -47,6 +47,8 @@ FILE_PREFIX = os.getenv('FILE_PREFIX',
                         '')
 MAKE_PUBLIC = bool(strtobool(os.getenv('MAKE_PUBLIC', 'false').lower()))
 
+INCLUDE_LINEAGE = bool(strtobool(os.getenv('INCLUDE_LINEAGE', 'false').lower()))
+
 # COG profile
 cog_profile = {
     'driver': 'GTiff',
@@ -81,11 +83,13 @@ def _get_log_level(level):
         'CRITICAL': logging.CRITICAL,
     }.get(level, logging.INFO)
 
+
 def _read_xml(dc, bucket, path):
-    logging.info('Loading xml: %s', _get_s3_url(bucket, path))
+    logging.info('Loading xml: {}'.format(_get_s3_url(bucket, path)))
 
-    dataset_id =  str(uuid.uuid5(uuid.NAMESPACE_URL, _get_s3_url(bucket, path)))
+    dataset_id = str(uuid.uuid5(uuid.NAMESPACE_URL, _get_s3_url(bucket, path)))
 
+    logging.info("Getting dataset: {}".format(dataset_id))
     dataset = dc.index.datasets.get(dataset_id)
 
     return dataset.metadata_doc
@@ -308,8 +312,11 @@ def _create_metadata_file(dc, product_name, uri, extent, source, source_metadata
         logging.error('Could not find product %s in datacube', product_name)
 
     # Create a new dataset
+    sources = []
+    if INCLUDE_LINEAGE:
+        sources = [source]
     dts = make_dataset(
-        product=product, sources=[source],
+        product=product, sources=sources,
         extent=extent, center_time=center_time, uri=uri
     )
 
@@ -330,7 +337,11 @@ def _create_metadata_file(dc, product_name, uri, extent, source, source_metadata
 
 
 def _upload(client, bucket, remote_path, local_file, makepublic=False, mimetype=None):
-
+    logging.info("Uploading file {} to bucket and path {}/{}".format(
+        local_file,
+        bucket,
+        remote_path
+    ))
     data = open(local_file, 'rb')
 
     extra_args = dict()
@@ -417,7 +428,7 @@ def main(input_file):
         # LANDSAT_8/172/61/2013/06/20/LC08_L1TP_172061_20130620_20170503_01_T1
         filename = file_path.split('/')[-1]
 
-        s3_filepath = file_path.split(filename)[0]
+        s3_filepath = OUTPUT_PATH + '/' + file_path.split(filename)[0]
         filename = filename.replace('L1TP', 'WATER')
 
         masked_filename = filename + '_water.tiff'
