@@ -4,8 +4,11 @@ RUN mkdir -p /opt/data && \
     mkdir -p /opt/scripts
 WORKDIR /opt/data
 
+RUN apt-get update && apt-get install -y gfortran
+RUN pip3 install git+https://github.com/GeoscienceAustralia/fc --no-deps --global-option=build --global-option='--executable=/usr/bin/env python3'
+
 RUN pip3 install --index-url https://packages.dea.gadevs.ga/ wofs && \
-    pip3 install ruamel.yaml rio-cogeo
+    pip3 install ruamel.yaml rio-cogeo numexpr
 
 # Define example env variables so users know how to use this image
 ENV INPUT_S3_BUCKET="dea-public-data" \
@@ -24,7 +27,7 @@ ENV INPUT_S3_BUCKET="dea-public-data" \
     MAX_JOB_PER_WORKER=1 \
     MAKE_PUBLIC="True"
 
-COPY watch-queue.py run.py /opt/scripts/
+COPY watch-queue.py run.py run_frak.py /opt/scripts/
 RUN chmod +x /opt/scripts/*.py && \
     ln -s /opt/scripts/watch-queue.py /usr/local/bin/watch-queue.py
 

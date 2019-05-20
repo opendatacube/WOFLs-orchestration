@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 
 
+import logging
 import os
 import uuid
 import warnings
 from datetime import date
+from distutils.util import strtobool
 
 import datacube
-import logging
 import yaml
 from datacube.helpers import write_geotiff
 from datacube.model import Measurement
-from fc.fractional_cover import fractional_cover
 from rio_cogeo.cogeo import cog_translate
 from rio_cogeo.profiles import cog_profiles
-from distutils.util import strtobool
 
+from fc.fractional_cover import fractional_cover
 
 INPUT_S3_BUCKET = os.getenv('INPUT_S3_BUCKET',
                             'dea-public-data')
@@ -151,11 +151,13 @@ def write_fc_band(fc, key, filename):
 
 
 def main(source_filename):
-    source = _read_xml(dc, INPUT_S3_BUCKET, source_filename)
+    source_metadata = _read_xml(dc, INPUT_S3_BUCKET, source_filename)
+    source = dc.index.datasets.get(source_metadata['id'])
+    logging.info("Source: {}".format(source))
     #sources = dc.index.datasets.get_datasets_for_location(source_filename, 'exact')
     #source = next(sources)
 
-    crs = 'EPSG:' + str(source.crs.epsg)
+    crs = 'EPSG:' + str(source['crs']['epsg'])
 
     query = {
         'datasets': [source['id']],

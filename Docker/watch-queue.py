@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 
-import boto3
 import json
-import run
-import os
 import logging
+import os
 import time
-from hashlib import md5
 from datetime import date, datetime, timedelta
+from hashlib import md5
 from pathlib import PurePath
 
+import boto3
+
+import run_frak
+import run
 
 SQS_QUEUE_URL = os.getenv('SQS_QUEUE_URL', 'landsat-to-wofs')
 SQS_MESSAGE_PREFIX = os.getenv('SQS_MESSAGE_PREFIX', '')
 SQS_POLL_TIME_SEC = os.getenv('SQS_POLL_TIME_SEC', '10')
 JOB_MAX_TIME_SEC = os.getenv('JOB_MAX_TIME_SEC', '20')
 MAX_JOB_PER_WORKER = os.getenv('MAX_JOB_PER_WORKER', '1')
+TYPE = os.getenv('TYPE', 'wofs')  # or frak
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 
 
@@ -81,7 +84,12 @@ def processing_loop(sqs, sqs_queue_url, sqs_message_prefix, sqs_poll_time, job_m
                     # Read message
                     logging.info(body)
                     key = body
-                    run.main(key)
+
+                    if TYPE == 'wofs':
+                        run.main(key)
+                    else:
+                        run_frak.main(key)
+
                     delete_message(
                         sqs, sqs_queue_url, message
                     )

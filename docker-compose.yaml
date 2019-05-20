@@ -10,19 +10,18 @@ services:
     
       - INPUT_S3_BUCKET=frontiersi-odc-data
       - OUTPUT_S3_BUCKET=test.data.frontiersi.io
-      - OUTPUT_PATH=usgs/wofs
+      # - OUTPUT_PATH=usgs/wofs
 
-      - SQS_QUEUE_URL=landsat-to-wofs
+      # - SQS_QUEUE_URL=landsat-to-wofs
 
       - LOG_LEVEL=INFO
-      - FILE_PREFIX=S2_WATER_3577
       - DRY_RUN=True
 
       - DB_DATABASE=opendatacube
       - DB_USERNAME=opendatacube
       - DB_PASSWORD=opendatacubepassword
       - DB_PORT=5432
-      - DB_HOSTNAME=172.27.0.3
+      - DB_HOSTNAME=172.19.0.3
     volumes:
       - ./data:/opt/data
       - ./Docker:/opt/scripts
