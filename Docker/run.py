@@ -246,6 +246,16 @@ def _convert_to_cog(input_file, output_file):
     convert_args = ['rio',
                     'cogeo',
                     'create',
+                    '-p',
+                    'deflate',
+                    '-r',
+                    'nearest',
+                    '--overview-level',
+                    '5',
+                    '--co',
+                    'BLOCKXSIZE=256',
+                    '--co',
+                    'BLOCKYSIZE=256',
                     '--overview-resampling',
                     'nearest',
                     '--overview-blocksize',
@@ -326,6 +336,8 @@ def _upload(client, bucket, remote_path, local_file, makepublic=False, mimetype=
 
 def main(input_file):
     # Initialise clients
+    # Set GDAL env for rasterio cogeo defaults 
+    os.environ['GDAL_TIFF_OVR_BLOCKSIZE']='256'
     s3 = boto3.resource('s3')
     dc = datacube.Datacube(app='WOFL-iron')
     logging.basicConfig(
