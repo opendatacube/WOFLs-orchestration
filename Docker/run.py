@@ -25,6 +25,7 @@ from pathlib import Path
 import subprocess
 from subprocess import check_call
 from distutils.util import strtobool
+import rasterio
 
 
 # This will be run in docker, so we load config from env vars
@@ -240,8 +241,29 @@ def _generate_filepath(file_prefix, path_prefix, center_time, tile_id):
 
     return filepath, filename
 
-
-def _convert_to_cog(input_file, output_file):
+def _calculate_blocksize(tiff_file):
+    def calculate_default(rastersize):
+        if rastersize >= 256:
+            blocksize=256
+            return blocksize
+        elif rastersize >= 128:
+            blocksize=128
+            return blocksize
+        elif rastersize >= 64:
+            blocksize=64
+            return blocksize
+        elif rastersize <=16 or rastersize> 16:   
+            blocksize=16
+            return blocksize
+    with rasterio.open(str(tiff_file), 'r') as src:
+            blocksizey= src.height 
+            blocksizex= src.width
+    if blocksizex < blocksizey:
+        return(calculate_default(blocksizex))
+    else:
+        return(calculate_default(blocksizey))
+      
+def _convert_to_cog(input_file, output_file, blocksize):
     logging.debug('converting to COG')
     convert_args = ['rio',
                     'cogeo',
@@ -253,9 +275,9 @@ def _convert_to_cog(input_file, output_file):
                     '--overview-level',
                     '5',
                     '--co',
-                    'BLOCKXSIZE=256',
+                    'BLOCKXSIZE='+ str(blocksize),
                     '--co',
-                    'BLOCKYSIZE=256',
+                    'BLOCKYSIZE='+ str(blocksize),
                     '--overview-resampling',
                     'nearest',
                     '--overview-blocksize',
@@ -381,7 +403,8 @@ def main(input_file):
         masked_filename = filename + '_water.tiff'
         raw_filename = filename + 'raw.tiff'
         _save(masked_data, './' + raw_filename)
-        _convert_to_cog(raw_filename, masked_filename)
+        blocksize = _calculate_blocksize(raw_filename)
+        _convert_to_cog(raw_filename, masked_filename, blocksize)
 
         # Create metadata doc
         _create_metadata_file(
