@@ -5,9 +5,10 @@ import logging
 import os
 import uuid
 import warnings
-from datetime import date
+from datetime import datetime
 from distutils.util import strtobool
 
+import boto3
 import datacube
 import yaml
 from datacube.helpers import write_geotiff
@@ -19,11 +20,10 @@ from fc.fractional_cover import fractional_cover
 
 INPUT_S3_BUCKET = os.getenv('INPUT_S3_BUCKET',
                             'dea-public-data')
-
-INPUT_FILE = os.getenv('INPUT_FILE',
-                       'file:///home/david/Downloads/sr/LC08_L1TP_074072_20160917_20170321_01_T1.yaml')
 OUTPUT_S3_BUCKET = os.getenv('OUTPUT_S3_BUCKET',
-                             'dea-public-data')
+                            'dea-public-data')
+OUTPUT_PATH = os.getenv('OUTPUT_PATH',
+                        'WOfS/WOFLs/v2.1.6/combined')
 
 #SOURCE_FILE = 'file:///home/david/Downloads/sr/LC08_L1TP_074072_20160917_20170321_01_T1.yaml'
 
@@ -150,25 +150,28 @@ def write_fc_band(fc, key, filename):
     return output_filename
 
 
-def main(source_filename):
-    source_metadata = _read_xml(dc, INPUT_S3_BUCKET, source_filename)
+def main(input_file):
+    s3 = boto3.resource('s3')      
+    file_path = input_file.split('usgs/')[1].strip(".xml")
+    # LANDSAT_8/172/61/2013/06/20/LC08_L1TP_172061_20130620_20170503_01_T1
+    filename = file_path.split('/')[-1]
+
+    s3_filepath = OUTPUT_PATH + '/' + file_path.split(filename)[0]
+    filename = filename.replace('L1TP', 'FC')
+
+    source_metadata = _read_xml(dc, INPUT_S3_BUCKET, input_file)
     source = dc.index.datasets.get(source_metadata['id'])
     logging.info("Source: {}".format(source))
-    #sources = dc.index.datasets.get_datasets_for_location(source_filename, 'exact')
-    #source = next(sources)
 
-    crs = 'EPSG:' + str(source['crs']['epsg'])
+    crs = 'EPSG:' + str(source.crs.epsg)
 
     query = {
-        'datasets': [source['id']],
+        'datasets': [source],
         'crs': crs,
         'resolution': (-30, 30),
         'output_crs': crs,
         'product': source.type.name
     }
-
-    uri = source.uris[0]
-    filename = uri[uri.rfind('/') + 1:uri.rfind('.yaml')] + '_FC'
 
     fc = load_and_generate_fc(query)
     if fc:
@@ -191,7 +194,7 @@ def main(source_filename):
         # Generate new YAML
         new_doc = source.metadata_doc_without_lineage()
         new_doc['id'] = str(uuid.uuid4())
-        new_doc['creation_dt'] = date.today()
+        new_doc['creation_dt'] = datetime.utcnow().isoformat()
         new_doc['image'] = {'bands': {}}
         new_doc['product_type'] = 'fractional_cover'
         del new_doc['processing_level']

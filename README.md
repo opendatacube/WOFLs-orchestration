@@ -32,3 +32,6 @@ The Orchestration component will monitor the SQS queue for new ARD data, when it
 When the new job starts it will classify the data and save the result to AWS S3
 If the job fails it will be restarted.
 
+# Notes and Todos
+## WOfS
+This process has set bit flags for the WOfS dataset. There are a number that need to be added still, including `contiguity` and the `terrain` flags.
