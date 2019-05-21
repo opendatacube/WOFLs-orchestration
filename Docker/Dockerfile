@@ -1,5 +1,8 @@
 FROM opendatacube/datacube-core:latest
 
+RUN pip3 install cligj==0.5.0
+
+
 RUN pip3 install --index-url https://packages.dea.gadevs.ga/ wofs && \
     pip3 install ruamel.yaml rio-cogeo
 
