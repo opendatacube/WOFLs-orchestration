@@ -12,7 +12,7 @@ jobs:
     - stage: deploy
       if: (branch = master OR (tag = branch)) AND type = push
       script:
-        - export CONFIG_TAG=$(git describe --tags | awk -F'[.]' '{if ($2!="") print $1"."$2+1"-unstable."$2"."$TRAVIS_BUILD_NUMBER; else print $1"."$2;}')
+        - export CONFIG_TAG="wofs-1.23.$TRAVIS_BUILD_NUMBER"
         - docker build -t opendatacube/pipelines:$CONFIG_TAG -t opendatacube/pipelines:latest Docker/
         - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
         - docker push opendatacube/pipelines:$CONFIG_TAG
