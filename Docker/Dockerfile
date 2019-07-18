@@ -7,8 +7,9 @@ WORKDIR /opt/data
 RUN apt-get update && apt-get install -y gfortran
 RUN pip3 install git+https://github.com/GeoscienceAustralia/fc --no-deps --global-option=build --global-option='--executable=/usr/bin/env python3'
 
-RUN pip3 install --index-url https://packages.dea.gadevs.ga/ wofs && \
-    pip3 install ruamel.yaml rio-cogeo numexpr
+RUN pip3 install cligj==0.5.0
+RUN pip3 install --index-url https://packages.dea.gadevs.ga/ wofs
+RUN pip3 install ruamel.yaml rio-cogeo numexpr
 
 # Define example env variables so users know how to use this image
 ENV INPUT_S3_BUCKET="dea-public-data" \
