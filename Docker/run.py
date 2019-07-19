@@ -449,7 +449,7 @@ def main(input_file):
         # Create metadata doc
         _create_metadata_file(
             dc,
-            'ls_usgs_wofs',
+            'ls8_usgs_wofs_scene',
             masked_filename,
             extent,
             source,
