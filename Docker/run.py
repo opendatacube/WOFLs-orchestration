@@ -45,6 +45,9 @@ LOG_LEVEL = os.getenv('LOG_LEVEL',
                       'INFO')
 FILE_PREFIX = os.getenv('FILE_PREFIX',
                         '')
+ROOT_FOLER =  os.getenv('ROOT_FOLER',
+                        'usgs')
+
 MAKE_PUBLIC = bool(strtobool(os.getenv('MAKE_PUBLIC', 'false').lower()))
 
 INCLUDE_LINEAGE = bool(strtobool(os.getenv('INCLUDE_LINEAGE', 'false').lower()))
@@ -424,7 +427,7 @@ def main(input_file):
     if len(dtypes) is 1:
         # Get file naming config
         # case-studies/usgs/LANDSAT_8/172/61/2013/06/20/LC08_L1TP_172061_20130620_20170503_01_T1.xml
-        file_path = input_file.split('usgs/')[1].strip(".xml")
+        file_path = input_file.split(ROOT_FOLER + '/')[1].strip(".xml")
         # LANDSAT_8/172/61/2013/06/20/LC08_L1TP_172061_20130620_20170503_01_T1
         filename = file_path.split('/')[-1]
 

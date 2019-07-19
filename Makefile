@@ -31,5 +31,5 @@ up-frak:
 
 
 push:
-	docker build ./Docker --tag crcsi/landsat-wofs
-	docker push crcsi/landsat-wofs
+	docker build ./Docker --tag geoscienceaustralia/landsat-wofs
+	docker push geoscienceaustralia/landsat-wofs
