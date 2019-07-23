@@ -26,6 +26,7 @@ measurements:
             nodata:
                 bits: 0
                 values: 
+                    0: false
                     1: true
                 description: No data
             sea:
