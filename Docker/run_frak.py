@@ -169,6 +169,7 @@ def main(input_file):
         'datasets': [source],
         'crs': crs,
         'resolution': (-30, 30),
+        'align': (15, 15),
         'output_crs': crs,
         'product': source.type.name
     }
