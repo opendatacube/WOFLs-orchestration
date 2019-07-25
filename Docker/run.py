@@ -146,6 +146,10 @@ def _load_data(dc, ds_id, measurements):
 
     # resample to highest band
     res = (-30, 30)
+    
+    # align to USGS pixel
+    align = (15, 15)
+    
     # res = d.measurements['fmask']['info']['geotransform'][5], d.measurements['fmask']['info']['geotransform'][1]
 
     logging.debug('Using CRS: %s', crs)
@@ -155,6 +159,7 @@ def _load_data(dc, ds_id, measurements):
                    datasets=[source],
                    output_crs=crs,
                    resolution=res,
+                   align=align,
                    measurements=measurements)
 
     # Remove Time Dimension
