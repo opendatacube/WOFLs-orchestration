@@ -1,7 +1,7 @@
 add-to-queue:
 	BUCKET=deafrica-data \
-	BUCKET_PATH=test/victoria \
-	LIMIT=9999 \
+	BUCKET_PATH=usgs \
+	LIMIT=99999 \
 	AWS_DEFAULT_REGION=us-west-2 \
 	QUEUE=landsat-to-wofs \
 	python3 add_to_queue.py
