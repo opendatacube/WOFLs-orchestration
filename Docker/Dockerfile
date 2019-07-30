@@ -14,12 +14,12 @@ RUN pip3 install ruamel.yaml rio-cogeo numexpr
 # Define example env variables so users know how to use this image
 ENV INPUT_S3_BUCKET="dea-public-data" \
     OUTPUT_S3_BUCKET="dea-public-data" \
-    OUTPUT_PATH="WOfS/WOFLs/v2.1.6/combined" \
+    OUTPUT_PATH="stage1_WOFLs" \
     LOG_LEVEL="INFO" \
     FILE_PREFIX="" \
     DB_HOSTNAME="localhost" \
     DB_PORT="5432" \
-    DB_USERNAME="cube" \
+    DB_USERNAME="africa" \
     DB_PASSWORD="" \
     SQS_QUEUE_URL="wofs" \
     SQS_MESSAGE_PREFIX="/L2/sentinel-2-nrt/S2MSIARD/" \

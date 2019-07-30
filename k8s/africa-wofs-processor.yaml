@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: wofs-deployment
+  name: africa-wofs-deployment
   labels:
     app: wofs-processor
 spec:
@@ -63,12 +63,12 @@ spec:
         - name: DB_USERNAME
           valueFrom:
             secretKeyRef:
-              name: deafrica-eks
+              name: africa-datacube
               key: postgres-username
         - name: DB_PASSWORD
           valueFrom:
             secretKeyRef:
-              name: deafrica-eks
+              name: africa-datacube
               key: postgres-password
         - name: DB_USERNAME_DEAFRICA
           valueFrom:
@@ -83,7 +83,7 @@ spec:
         - name: DATACUBE_CONFIG_PATH
           value: "/opt/custom-config.conf" 
         - name: DB_DATABASE
-          value: "deafrica"
+          value: "africa"
         - name: DB_HOSTNAME
           value: "db-deafrica-eks-default.clgqttgwz3jw.us-west-2.rds.amazonaws.com"
         - name: DB_PORT
@@ -95,7 +95,7 @@ spec:
         - name: FILE_PREFIX
           value: ""
         - name: SQS_MESSAGE_PREFIX
-          value: test/victoria/LANDSAT_8
+          value: usgs
         - name: SQS_POLL_TIME_SEC
           value: "20"
         - name: JOB_MAX_TIME_SEC

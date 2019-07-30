@@ -12,9 +12,9 @@ logging.getLogger('s3transfer').setLevel(logging.CRITICAL)
 logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 
 # Set some env vars
-BUCKET = os.environ.get('BUCKET', 'frontiersi-odc-test')
-PATH = os.environ.get('BUCKET_PATH', '')
-QUEUE = os.environ.get('QUEUE', 'landsat-to-wofl')
+BUCKET = os.environ.get('BUCKET', 'deafrica-data')
+PATH = os.environ.get('BUCKET_PATH', 'usgs')
+QUEUE = os.environ.get('QUEUE', 'landsat-to-wofs')
 
 LIMIT = int(os.environ.get('LIMIT', 10))
 
