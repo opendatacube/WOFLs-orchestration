@@ -36,9 +36,9 @@ spec:
         resources:
           requests:
             cpu: 1
-            memory: 2048Mi
+            memory: 8192Mi
           limits:
-            memory: 2048Mi
+            memory: 8192Mi
         tty: true
         stdin: true
         env:
@@ -50,14 +50,14 @@ spec:
           value: "usgs"
         - name: OUTPUT_S3_BUCKET
           value: "deafrica-data"
-        - name: OUT_PATH
+        - name: OUTPUT_PATH
           value: "stage1_WOFLS"
         - name: SQS_QUEUE_URL
           value: "landsat-to-wofs"
         - name: CLEANUP
           value: "True"
         - name: ROOT_FOLER
-          value: "victoria"
+          value: "usgs"
         - name: UPLOAD
           value: "True"
         - name: DB_USERNAME
