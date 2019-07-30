@@ -1,6 +1,6 @@
 add-to-queue:
 	BUCKET=deafrica-data \
-	BUCKET_PATH=test/victoria/LANDSAT_8 \
+	BUCKET_PATH=test/victoria \
 	LIMIT=9999 \
 	AWS_DEFAULT_REGION=us-west-2 \
 	QUEUE=landsat-to-wofs \
