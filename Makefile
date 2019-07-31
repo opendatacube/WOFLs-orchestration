@@ -7,9 +7,9 @@ add-to-queue:
 	python3 add_to_queue.py
 
 add-to-frak:
-	BUCKET=frontiersi-odc-data \
-	BUCKET_PATH=case-studies/usgs/LANDSAT_8 \
-	LIMIT=9999 \
+	BUCKET=deafrica-data \
+	BUCKET_PATH=usgs/ \
+	LIMIT=3 \
 	AWS_DEFAULT_REGION=us-west-2 \
 	QUEUE=landsat-to-frak \
 	python3 add_to_queue.py
