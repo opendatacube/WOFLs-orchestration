@@ -47,6 +47,8 @@ FILE_PREFIX = os.getenv('FILE_PREFIX',
                         '')
 ROOT_FOLDER =  os.getenv('ROOT_FOLDER',
                         'usgs')
+PRODUCT =  os.getenv('PRODUCT',
+                        'ls_usgs_wofs_scene')
 
 MAKE_PUBLIC = bool(strtobool(os.getenv('MAKE_PUBLIC', 'false').lower()))
 
@@ -367,6 +369,7 @@ def _upload(client, bucket, remote_path, local_file, makepublic=False, mimetype=
         Key=remote_path,
         **args
     )
+    data.close()
 
 def _pq_filter(pixel_qa):
     # From: https://github.com/bellemae/dea_bits/blob/master/TestWOfSbits.py
@@ -454,7 +457,7 @@ def main(input_file):
         # Create metadata doc
         _create_metadata_file(
             dc,
-            'ls8_usgs_wofs_scene',
+            PRODUCT,
             masked_filename,
             extent,
             source,
