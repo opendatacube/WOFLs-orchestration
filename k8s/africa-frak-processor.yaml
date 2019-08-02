@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: africa-frac-deployment
+  name: africa-frak-deployment
   labels:
-    app: frac-processor
+    app: frak-processor
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: python-frac-processor
+      app: python-frak-processor
   template:
     metadata:
       annotations:
         iam.amazonaws.com/role: deafrica-ec2-s3_access
       labels:
-        app: python-frac-processor
+        app: python-frak-processor
     spec:
       nodeSelector:
         beta.kubernetes.io/os: linux
@@ -35,7 +35,7 @@ spec:
         #command: [ "/bin/cat" ]
         resources:
           requests:
-            cpu: 1
+            cpu: 2
             memory: 8192Mi
           limits:
             memory: 8192Mi
@@ -49,10 +49,10 @@ spec:
         - name: IN_PATH
           value: "usgs"
         - name: OUTPUT_S3_BUCKET
-          value: "test-results-deafrica-staging-west"
-          #value: "deafrica-data"
+          #value: "test-results-deafrica-staging-west"
+          value: "deafrica-data"
         - name: OUTPUT_PATH
-          value: "usgs/xwofls"
+          value: "usgs/c1/fc"
         - name: SQS_QUEUE_URL
           value: "landsat-to-frak"
         - name: CLEANUP
@@ -61,8 +61,6 @@ spec:
           value: "c1"
         - name: UPLOAD
           value: "True"
-        - name: TYPE
-          value: "frak"
         - name: DB_USERNAME
           valueFrom:
             secretKeyRef:
@@ -92,7 +90,7 @@ spec:
         - name: DB_PORT
           value: "5432"
         - name: TYPE
-          value: "wofs"
+          value: "frak"
         - name: LOG_LEVEL
           value: "INFO"
         - name: FILE_PREFIX
@@ -102,7 +100,7 @@ spec:
         - name: SQS_POLL_TIME_SEC
           value: "20"
         - name: JOB_MAX_TIME_SEC
-          value: "300"
+          value: "480"
         - name: MAX_JOB_PER_WORKER
           value: "1"
         - name: MAKE_PUBLIC

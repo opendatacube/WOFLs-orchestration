@@ -25,6 +25,9 @@ OUTPUT_S3_BUCKET = os.getenv('OUTPUT_S3_BUCKET',
 OUTPUT_PATH = os.getenv('OUTPUT_PATH',
                         'WOfS/WOFLs/v2.1.6/combined')
 
+ROOT_FOLER =  os.getenv('ROOT_FOLER',
+                        'usgs')
+
 #SOURCE_FILE = 'file:///home/david/Downloads/sr/LC08_L1TP_074072_20160917_20170321_01_T1.yaml'
 
 dc = datacube.Datacube(app='fc')
@@ -88,8 +91,9 @@ def _upload(client, bucket, remote_path, local_file, makepublic=False, mimetype=
         Key=remote_path,
         **args
     )
+    data.close()
 
-
+    
 def create_cog(source, output, bidx):
     cogeo_profile = 'deflate'
     nodata = -1
@@ -152,7 +156,7 @@ def write_fc_band(fc, key, filename):
 
 def main(input_file):
     s3 = boto3.resource('s3')      
-    file_path = input_file.split('usgs/')[1].strip(".xml")
+    file_path = input_file.split(ROOT_FOLER + '/')[1].rstrip(".xml")
     # LANDSAT_8/172/61/2013/06/20/LC08_L1TP_172061_20130620_20170503_01_T1
     filename = file_path.split('/')[-1]
 
