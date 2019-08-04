@@ -15,8 +15,10 @@ logging.getLogger('urllib3').setLevel(logging.CRITICAL)
 
 #QUEUE = os.environ.get('QUEUE', 'dsg-test-queue')
 QUEUE = os.environ.get('QUEUE', 'landsat-to-wofs')
+QUEUE = os.environ.get('QUEUE', 'landsat-to-frak')
 #DLQUEUE = os.environ.get('DLQUEUE', 'l2c-dead-letter')
 DLQUEUE = os.environ.get('DLQUEUE', 'landsat-to-wofs-deadletter')
+DLQUEUE = os.environ.get('DLQUEUE', 'landsat-to-frak-deadletter')
 
 # Set up some AWS stuff
 s3 = boto3.client('s3')

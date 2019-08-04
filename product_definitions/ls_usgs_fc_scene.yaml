@@ -1,14 +1,10 @@
-name: ls8_usgs_fc_scene
-description: 'Landsat 8 Fractional Cover based on USGS Level 2 Scenes'
+name: ls_usgs_fc_scene
+description: 'Landsat Fractional Cover based on USGS Level 2 Scenes'
 metadata_type: eo
 
 metadata:
   format:
     name: GeoTiff
-  instrument:
-    name: OLI_TIRS
-  platform:
-    code: LANDSAT_8
   product_type: fractional_cover
 
 measurements:
