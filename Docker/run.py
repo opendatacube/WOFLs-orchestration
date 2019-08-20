@@ -45,6 +45,11 @@ LOG_LEVEL = os.getenv('LOG_LEVEL',
                       'INFO')
 FILE_PREFIX = os.getenv('FILE_PREFIX',
                         '')
+ROOT_FOLDER =  os.getenv('ROOT_FOLDER',
+                        'usgs')
+PRODUCT =  os.getenv('PRODUCT',
+                        'ls_usgs_wofs_scene')
+
 MAKE_PUBLIC = bool(strtobool(os.getenv('MAKE_PUBLIC', 'false').lower()))
 
 INCLUDE_LINEAGE = bool(strtobool(os.getenv('INCLUDE_LINEAGE', 'false').lower()))
@@ -143,6 +148,10 @@ def _load_data(dc, ds_id, measurements):
 
     # resample to highest band
     res = (-30, 30)
+    
+    # align to USGS pixel
+    align = (15, 15)
+    
     # res = d.measurements['fmask']['info']['geotransform'][5], d.measurements['fmask']['info']['geotransform'][1]
 
     logging.debug('Using CRS: %s', crs)
@@ -152,6 +161,7 @@ def _load_data(dc, ds_id, measurements):
                    datasets=[source],
                    output_crs=crs,
                    resolution=res,
+                   align=align,
                    measurements=measurements)
 
     # Remove Time Dimension
@@ -359,6 +369,7 @@ def _upload(client, bucket, remote_path, local_file, makepublic=False, mimetype=
         Key=remote_path,
         **args
     )
+    data.close()
 
 def _pq_filter(pixel_qa):
     # From: https://github.com/bellemae/dea_bits/blob/master/TestWOfSbits.py
@@ -424,7 +435,7 @@ def main(input_file):
     if len(dtypes) is 1:
         # Get file naming config
         # case-studies/usgs/LANDSAT_8/172/61/2013/06/20/LC08_L1TP_172061_20130620_20170503_01_T1.xml
-        file_path = input_file.split('usgs/')[1].strip(".xml")
+        file_path = input_file.split(ROOT_FOLDER + '/')[1].strip(".xml")
         # LANDSAT_8/172/61/2013/06/20/LC08_L1TP_172061_20130620_20170503_01_T1
         filename = file_path.split('/')[-1]
 
@@ -446,7 +457,7 @@ def main(input_file):
         # Create metadata doc
         _create_metadata_file(
             dc,
-            'ls_usgs_wofs',
+            PRODUCT,
             masked_filename,
             extent,
             source,

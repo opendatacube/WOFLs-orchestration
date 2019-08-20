@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: landsat-processor-deployment
+  labels:
+    app: python-landsat-processor
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: python-landsat-processor
+  template:
+    metadata:
+      annotations:
+        iam.amazonaws.com/role: deafrica-ec2-s3_access
+      labels:
+        app: python-landsat-processor
+    spec:
+      nodeSelector:
+        beta.kubernetes.io/os: linux
+        #kops.k8s.io/instancegroup: spot-nodes1
+      containers:
+      - name: landsat-processor
+        image: geoscienceaustralia/landsat-to-cog_pygdal
+        #image: crcsi/landsat-processor
+        env:
+        - name: AWS_DEFAULT_REGION
+          value: us-west-2
+        - name: IN_BUCKET
+          value: "deafrica-staging-west"
+        - name: IN_PATH
+          value: "L5-Ghana_original"
+        - name: OUT_BUCKET
+          value: "test-results-deafrica-staging-west"
+        - name: OUT_PATH
+          value: "L5-Ghana_original_k8s"
+        - name: QUEUE
+          value: "dsg-test-queue"
+        - name: DLQUEUE
+          value: "l2c-dead-letter"
+        - name: CLEANUP
+          value: "True"
+        - name: UPLOAD
+          value: "True"
+#        - name: AWS_ACCESS_KEY_ID
+#          value: "dummy-key"
+
